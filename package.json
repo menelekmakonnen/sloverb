@@ -1,0 +1,35 @@
+{
+    "name": "slowed-studio",
+    "private": true,
+    "version": "1.0.0",
+    "type": "module",
+    "main": "electron/main.js",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview",
+        "electron:dev": "concurrently \"vite --port 4597 --strictPort\" \"wait-on http://localhost:4597 && cross-env VITE_DEV_SERVER_URL=http://localhost:4597 electron .\""
+    },
+    "dependencies": {
+        "@ffmpeg/core": "^0.12.10",
+        "@ffmpeg/ffmpeg": "^0.12.15",
+        "@ffmpeg/util": "^0.12.2",
+        "@fontsource/space-mono": "^5.2.9",
+        "@fontsource/syne": "^5.2.7",
+        "music-metadata": "^11.12.1",
+        "play-dl": "^1.9.7",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "youtube-dl-exec": "^3.1.3"
+    },
+    "devDependencies": {
+        "@types/react": "^18.2.43",
+        "@types/react-dom": "^18.2.17",
+        "@vitejs/plugin-react": "^4.2.1",
+        "concurrently": "^9.2.1",
+        "cross-env": "^10.1.0",
+        "electron": "^40.8.0",
+        "vite": "^5.0.8",
+        "wait-on": "^9.0.4"
+    }
+}
