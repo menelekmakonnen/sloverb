@@ -1,5 +1,7 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { fetchFile } from '@ffmpeg/util';
+import coreURL from '@ffmpeg/core?url';
+import wasmURL from '@ffmpeg/core/wasm?url';
 
 let ffmpeg = null;
 
@@ -14,10 +16,9 @@ export const getFFmpeg = async (onProgress) => {
     }
 
     try {
-        const baseURL = window.location.origin;
         await ffmpeg.load({
-            coreURL: `${baseURL}/ffmpeg-core.js`,
-            wasmURL: `${baseURL}/ffmpeg-core.wasm`,
+            coreURL,
+            wasmURL,
         });
     } catch (e) {
         ffmpeg = null;
@@ -37,8 +38,25 @@ export const extractAudioFromVideo = async (videoFile, onProgress) => {
 
     // delete extracted.wav to save RAM
     await ff.deleteFile('extracted.wav');
+    await ff.deleteFile('input.mp4');
 
     return new Blob([audioData], { type: 'audio/wav' });
+};
+
+export const convertWavToMp3 = async (wavBlob, onProgress) => {
+    const ff = await getFFmpeg(onProgress);
+    await ff.writeFile('input.wav', await fetchFile(wavBlob));
+
+    // Convert WAV to MP3 (VBR highest quality ~ 192kbps - 320kbps equivalent)
+    await ff.exec(['-i', 'input.wav', '-codec:a', 'libmp3lame', '-qscale:a', '2', 'output.mp3']);
+
+    const mp3Data = await ff.readFile('output.mp3');
+
+    // cleanup
+    await ff.deleteFile('input.wav');
+    await ff.deleteFile('output.mp3');
+
+    return new Blob([mp3Data], { type: 'audio/mp3' });
 };
 
 export const muxAudioToVideo = async (videoFile, audioBlob, onProgress) => {

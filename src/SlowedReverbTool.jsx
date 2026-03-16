@@ -384,6 +384,7 @@ export default function SlowedReverbTool() {
   const [activePresets, setActivePresets] = useState(["Slowed + Reverb"]);
   const [dragging, setDragging] = useState(false);
   const [exportDone, setExportDone] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [savedPresets, setSavedPresets] = useState({});
   const [history, setHistory] = useState([]);
   const [library, setLibrary] = useState([]);
@@ -702,27 +703,22 @@ export default function SlowedReverbTool() {
     setIsPlaying(true);
   };
 
-  const playNextInQueue = async () => {
+  const playNextInQueue = async (specificIndex = null) => {
     if (studioQueue.length === 0) return;
-    const nextItem = studioQueue[0];
     
-    // We do NOT remove the item from the queue automatically anymore.
-    // The user must manually clear or remove it.
+    // If specificIndex is provided, play that item. Otherwise, play the first item (auto-play).
+    const indexToPlay = specificIndex !== null ? specificIndex : 0;
+    const nextItem = studioQueue[indexToPlay];
     
-    // BUT we must prevent infinite loops if the queue is exactly 1 item and it finishes playing.
-    // To handle "Any item that has been slowed and played in the Queue will be automatically kept in the queue",
-    // we actually just load it and let the user decide when to remove it.
-    // However, we should probably stop the queue from auto-advancing to the SAME item infinitely 
-    // when it finishes. 
+    const newQueue = [...studioQueue];
+    // Remove it from current position
+    newQueue.splice(indexToPlay, 1);
     
-    // For this implementation, we will load the first item. If the current playing item IS the first item,
-    // and it just ended, we should probably not auto-play it again instantly.
-    // Let's pop it and push it to the back to cycle, OR just pause?
-    // The instructions say: "will be automatically kept in the queue... until user clears queue or removes a specific one"
-    // Let's cycle it to the back of the queue so it stays in the queue but we move to the next song.
-
-    const newQueue = studioQueue.slice(1);
-    newQueue.push(nextItem);
+    // Auto-advance logic: If it was auto-play (index 0), cycle it to the back. 
+    // If it was manual play, we just remove it from the queue and play it.
+    if (specificIndex === null) {
+      newQueue.push(nextItem);
+    }
     setStudioQueue(newQueue);
 
     if (nextItem.type === 'file' && nextItem.file) {
@@ -1270,36 +1266,40 @@ export default function SlowedReverbTool() {
         )}
 
         {/* Waveform & Seeker & Playback Controls */}
-        {audioBuffer && (
-          <div style={{ marginBottom: 20 }}>
-            <WaveformViz analyser={analyserRef.current} isPlaying={isPlaying} />
-            <Seeker
-              audioCtxRef={audioCtxRef}
-              startTimeRef={startTimeRef}
-              pauseOffsetRef={pauseOffsetRef}
-              isPlaying={isPlaying}
-              speed={params.speed}
-              duration={audioBuffer.duration}
-              onSeek={handleSeek}
-            />
+        <div style={{ marginBottom: 20 }}>
+          <WaveformViz analyser={analyserRef.current} isPlaying={isPlaying} />
+          <Seeker
+            audioCtxRef={audioCtxRef}
+            startTimeRef={startTimeRef}
+            pauseOffsetRef={pauseOffsetRef}
+            isPlaying={isPlaying}
+            speed={params.speed}
+            duration={audioBuffer ? audioBuffer.duration : 0}
+            onSeek={handleSeek}
+          />
 
-            <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap", marginTop: 20 }}>
-              <button onClick={() => skipTime(-15)} style={{ background: "rgba(100,100,150,0.1)", border: "1px solid " + colors.cardBorder, color: colors.text, padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>-15s</button>
-              <button onClick={() => skipTime(-5)} style={{ background: "rgba(100,100,150,0.1)", border: "1px solid " + colors.cardBorder, color: colors.text, padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>-5s</button>
-              <button onClick={togglePlay} style={{ background: isPlaying ? "rgba(167,139,250,0.2)" : "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.4)", color: "#a78bfa", padding: "8px 24px", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: "bold" }}>
-                {isPlaying ? "⏸ Pause" : "▶ Play"}
-              </button>
-              <button onClick={stopAudio} style={{ background: "rgba(244,114,182,0.1)", border: "1px solid rgba(244,114,182,0.4)", color: "#f472b6", padding: "8px 24px", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: "bold" }}>
-                ⏹ Stop
-              </button>
-              <button onClick={() => skipTime(5)} style={{ background: "rgba(100,100,150,0.1)", border: "1px solid " + colors.cardBorder, color: colors.text, padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>+5s</button>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, background: "rgba(0,0,0,0.3)", padding: "4px 12px", borderRadius: 8, border: "1px solid " + colors.cardBorder }}>
-                <span style={{ fontSize: 12 }}>🔈</span>
-                <input type="range" min="0" max="1" step="0.01" value={masterVolume} onChange={e => setMasterVolume(parseFloat(e.target.value))} style={{ width: 80, cursor: "pointer" }} />
-              </div>
+          {/* Playback Buttons */}
+          <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap", marginTop: 20 }}>
+            <button onClick={() => audioBuffer && skipTime(-15)} disabled={!audioBuffer} style={{ background: "rgba(100,100,150,0.1)", border: "1px solid " + colors.cardBorder, color: colors.text, padding: "8px 16px", borderRadius: 8, cursor: audioBuffer ? "pointer" : "not-allowed", fontSize: 13, opacity: !audioBuffer ? 0.5 : 1 }}>-15s</button>
+            <button onClick={() => audioBuffer && skipTime(-5)} disabled={!audioBuffer} style={{ background: "rgba(100,100,150,0.1)", border: "1px solid " + colors.cardBorder, color: colors.text, padding: "8px 16px", borderRadius: 8, cursor: audioBuffer ? "pointer" : "not-allowed", fontSize: 13, opacity: !audioBuffer ? 0.5 : 1 }}>-5s</button>
+            <button onClick={() => audioBuffer && togglePlay()} disabled={!audioBuffer} style={{ background: isPlaying ? "rgba(167,139,250,0.2)" : "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.4)", color: "#a78bfa", padding: "8px 24px", borderRadius: 8, cursor: audioBuffer ? "pointer" : "not-allowed", fontSize: 14, fontWeight: "bold", opacity: !audioBuffer ? 0.5 : 1 }}>
+              {isPlaying ? "⏸ Pause" : "▶ Play"}
+            </button>
+            <button onClick={() => audioBuffer && stopAudio()} disabled={!audioBuffer} style={{ background: "rgba(244,114,182,0.1)", border: "1px solid rgba(244,114,182,0.4)", color: "#f472b6", padding: "8px 24px", borderRadius: 8, cursor: audioBuffer ? "pointer" : "not-allowed", fontSize: 14, fontWeight: "bold", opacity: !audioBuffer ? 0.5 : 1 }}>
+              ⏹ Stop
+            </button>
+            <button onClick={() => audioBuffer && skipTime(5)} disabled={!audioBuffer} style={{ background: "rgba(100,100,150,0.1)", border: "1px solid " + colors.cardBorder, color: colors.text, padding: "8px 16px", borderRadius: 8, cursor: audioBuffer ? "pointer" : "not-allowed", fontSize: 13, opacity: !audioBuffer ? 0.5 : 1 }}>+5s</button>
+          </div>
+          
+          {/* Dedicated Volume Bar Row */}
+          <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, background: "rgba(0,0,0,0.4)", padding: "10px 20px", borderRadius: 12, border: "1px solid " + colors.cardBorder, width: "100%", maxWidth: 350 }}>
+              <span style={{ fontSize: 16, filter: masterVolume === 0 ? "grayscale(100%) opacity(50%)" : "none" }}>{masterVolume === 0 ? "🔇" : masterVolume < 0.5 ? "🔉" : "🔊"}</span>
+              <input type="range" min="0" max="1" step="0.01" value={masterVolume} onChange={e => setMasterVolume(parseFloat(e.target.value))} style={{ flex: 1, cursor: "pointer", height: 6, accentColor: "#a78bfa" }} />
+              <span style={{ fontSize: 11, color: colors.textMuted, width: 32, textAlign: "right" }}>{Math.round(masterVolume * 100)}%</span>
             </div>
           </div>
-        )}
+        </div>
 
         {/* Presets */}
         <div style={{ marginBottom: 24 }}>
@@ -1381,12 +1381,13 @@ export default function SlowedReverbTool() {
         {/* Fine Controls removed playbacks spacing from here */}
 
         {/* Action Buttons */}
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", position: "relative" }}>
+          {/* Main WAV Export */}
           <button
-            onClick={handleExport}
+            onClick={() => handleExport('wav')}
             disabled={!audioBuffer || isExporting}
             style={{
-              flex: 1, minWidth: 200, maxWidth: 400,
+              flex: 1, minWidth: 200, maxWidth: 320,
               padding: "16px 24px",
               borderRadius: 12,
               border: "none",
@@ -1405,11 +1406,80 @@ export default function SlowedReverbTool() {
           >
             {isExporting ? (
               <span>
-                {isVideo ? "Rendering Video" : "Rendering Audio"}... {exportProgress}%
+                Rendering Audio... {exportProgress}%
                 <div style={{ position: "absolute", bottom: 0, left: 0, height: 3, background: "rgba(255,255,255,0.4)", width: `${exportProgress}%`, transition: "width 0.2s ease" }} />
               </span>
-            ) : exportDone ? "✓ Downloaded!" : (isVideo ? "⬇ Export MP4 Video" : "⬇ Export WAV Audio")}
+            ) : exportDone ? "✓ Downloaded!" : "⬇ Export WAV"}
           </button>
+
+          {/* Secondary Options Button */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setExportMenuOpen(!exportMenuOpen)}
+              disabled={!audioBuffer || isExporting}
+              style={{
+                width: 56, height: 56,
+                borderRadius: 12,
+                border: "1px solid " + (!audioBuffer || isExporting ? "transparent" : "rgba(167,139,250,0.5)"),
+                background: !audioBuffer || isExporting ? "rgba(100,100,150,0.1)" : "rgba(167,139,250,0.1)",
+                color: !audioBuffer || isExporting ? "#4b5563" : "#a78bfa",
+                fontSize: 20,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                cursor: !audioBuffer || isExporting ? "not-allowed" : "pointer",
+                transition: "all 0.2s ease",
+              }}
+            >
+              ⚙
+            </button>
+
+            {/* Dropdown Menu */}
+            {exportMenuOpen && audioBuffer && !isExporting && (
+              <div 
+                style={{
+                  position: "absolute", right: 0, bottom: 64, width: 220,
+                  background: colors.cardBg,
+                  border: "1px solid " + colors.cardBorder,
+                  borderRadius: 12,
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                  backdropFilter: "blur(12px)",
+                  zIndex: 100,
+                  overflow: "hidden",
+                  display: "flex", flexDirection: "column"
+                }}
+              >
+                <div style={{ padding: "12px 16px", background: "rgba(0,0,0,0.2)", borderBottom: "1px solid " + colors.cardBorder }}>
+                  <p style={{ margin: 0, fontSize: 11, color: colors.textMuted, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: "bold" }}>Export Options</p>
+                </div>
+                <button
+                  onClick={() => handleExport('mp3')}
+                  style={{
+                    padding: "14px 16px", textAlign: "left", background: "transparent", border: "none", borderBottom: "1px solid rgba(255,255,255,0.05)",
+                    color: colors.text, fontSize: 13, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    fontWeight: "bold"
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(167,139,250,0.1)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                >
+                  <span>Export MP3</span>
+                  <span style={{ fontSize: 10, color: colors.textMuted, background: "rgba(0,0,0,0.3)", padding: "2px 6px", borderRadius: 4 }}>High Q.</span>
+                </button>
+                <button
+                  onClick={() => handleExport('mp4')}
+                  disabled={!originalVideoFile}
+                  style={{
+                    padding: "14px 16px", textAlign: "left", background: "transparent", border: "none",
+                    color: originalVideoFile ? colors.text : colors.textMuted, fontSize: 13, cursor: originalVideoFile ? "pointer" : "not-allowed", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    opacity: originalVideoFile ? 1 : 0.5, fontWeight: "bold"
+                  }}
+                  onMouseEnter={e => { if (originalVideoFile) e.currentTarget.style.background = "rgba(167,139,250,0.1)" }}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                >
+                  <span>Export MP4</span>
+                  {originalVideoFile && <span style={{ fontSize: 10, color: colors.textMuted, background: "rgba(0,0,0,0.3)", padding: "2px 6px", borderRadius: 4 }}>Video</span>}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Info */}
