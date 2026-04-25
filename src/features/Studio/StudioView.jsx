@@ -5,7 +5,7 @@ import { Music, Download, Check, Globe, Play, Pause, Disc3 } from 'lucide-react'
 import { extractAudioFromVideo, muxAudioToVideo } from '../../ffmpegProcessor.js';
 import { encodeWAV, buildOfflineChain, PRESETS } from '../../lib/audioEngine.js';
 import { playbackEngine } from '../../lib/playbackEngine.js';
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 
 /* ── Knob ── */
 function Knob({ label, value, min, max, step, onChange, unit = '', color = 'var(--accent)' }) {
@@ -204,6 +204,8 @@ export default function StudioView() {
     store.setIsExporting(false);
   };
 
+  const [ytChoice, setYtChoice] = useState(null); // { results, resolve }
+
   const handleYoutube = async () => {
     if (!youtubeUrl || !window.electronAPI) return;
     store.setIsProcessing(true); store.setLoadingText('Fetching from YouTube...');
@@ -215,45 +217,64 @@ export default function StudioView() {
       const results = await window.electronAPI.fetchYoutube(youtubeUrl);
       if (!results || results.length === 0) throw new Error("No media found");
 
-      // Load first song into player
-      const first = results[0];
-      store.setLoadingText(`Decoding audio...`); store.setProgress(70);
+      // Add ALL downloads to library automatically
+      for (let i = 0; i < results.length; i++) {
+          const item = results[i];
+          await window.electronAPI.addToLibrary({
+              id: item.id || item.path || Date.now().toString() + i,
+              name: item.title,
+              title: item.title,
+              path: item.path,
+              type: 'audio',
+              artist: item.artist || 'YouTube',
+              duration: 0,
+              timestamp: Date.now()
+          });
+      }
+      addToast(`Saved ${results.length} track(s) to Library`, 'success');
+
+      store.setIsProcessing(false);
+      store.setYoutubeUrl('');
       
+      // Prompt user: Play Now or Add to Queue
+      setYtChoice({ results });
+    } catch (e) {
+      addToast(e?.message || 'YouTube download failed', 'error');
+      store.setIsProcessing(false);
+    } finally {
+      if (window.electronAPI.offYoutubeProgress) window.electronAPI.offYoutubeProgress(progressHandler);
+    }
+  };
+
+  const handleYtPlay = async () => {
+    if (!ytChoice) return;
+    const results = ytChoice.results;
+    setYtChoice(null);
+    const first = results[0];
+    try {
       const rawBuffer = await window.electronAPI.readFile(first.path);
       const ext = (first.path || '').split('.').pop()?.toLowerCase() || 'webm';
       const mimeMap = { mp3: 'audio/mpeg', m4a: 'audio/mp4', webm: 'audio/webm', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav' };
       const mime = mimeMap[ext] || 'audio/webm';
-      
       const f = new File([rawBuffer], `${first.title}.${ext}`, { type: mime });
       f.path = first.path;
-      await handleFile(f); 
-      addToast(`Loaded: ${first.title}`, 'success');
-
-      // Add rest of playlist to library
+      await handleFile(f);
+      // Queue the rest
       if (results.length > 1) {
-          store.setLoadingText(`Adding ${results.length - 1} tracks to library...`);
-          for (let i = 1; i < results.length; i++) {
-              const item = results[i];
-              await window.electronAPI.addToLibrary({
-                  id: item.id || Date.now().toString() + i,
-                  title: item.title,
-                  path: item.path,
-                  type: 'audio',
-                  artist: 'YouTube',
-                  duration: 0,
-                  dateAdded: Date.now()
-              });
-          }
-          addToast(`Added ${results.length - 1} tracks to Library`, 'success');
+        const queue = results.slice(1).map(r => ({ type: 'library', name: r.title, path: r.path, id: r.id, artist: r.artist || 'YouTube' }));
+        store.setQueue([...store.queue, ...queue]);
       }
-      
-      store.setYoutubeUrl('');
-    } catch (e) {
-      addToast(e?.message || 'YouTube download failed', 'error');
-    } finally {
-      store.setIsProcessing(false);
-      if (window.electronAPI.offYoutubeProgress) window.electronAPI.offYoutubeProgress(progressHandler);
-    }
+      addToast(`Playing: ${first.title}`, 'success');
+    } catch (e) { addToast('Failed to play', 'error'); }
+  };
+
+  const handleYtQueue = () => {
+    if (!ytChoice) return;
+    const results = ytChoice.results;
+    setYtChoice(null);
+    const queue = results.map(r => ({ type: 'library', name: r.title, path: r.path, id: r.id, artist: r.artist || 'YouTube' }));
+    store.setQueue([...store.queue, ...queue]);
+    addToast(`Added ${results.length} track(s) to queue`, 'success');
   };
 
   const allPresets = { ...PRESETS, ...savedPresets };
@@ -263,6 +284,34 @@ export default function StudioView() {
   return (
     <div style={{ height: '100%', overflow: 'auto', padding: '24px 28px' }} onDrop={handleDrop} onDragOver={e => e.preventDefault()}>
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ maxWidth: 750, margin: '0 auto' }}>
+
+        {/* YouTube Download Choice Modal */}
+        {ytChoice && (
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} style={{
+            position: 'fixed', inset: 0, zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+          }} onClick={() => setYtChoice(null)}>
+            <div onClick={e => e.stopPropagation()} style={{
+              background: 'var(--bg-elevated)', borderRadius: 16, padding: '28px 32px', maxWidth: 400, width: '90vw',
+              border: '1px solid var(--glass-border)', boxShadow: '0 24px 80px rgba(0,0,0,0.5)',
+            }}>
+              <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>
+                Download Complete
+              </h3>
+              <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text-dim)' }}>
+                {ytChoice.results.length} track(s) saved to Library. What would you like to do?
+              </p>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button onClick={handleYtPlay} className="btn btn-primary" style={{ flex: 1, padding: '10px 16px', borderRadius: 10, fontWeight: 600 }}>
+                  <Play size={16} /> Play Now
+                </button>
+                <button onClick={handleYtQueue} className="btn btn-accent-soft" style={{ flex: 1, padding: '10px 16px', borderRadius: 10, fontWeight: 600 }}>
+                  Add to Queue
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {/* ═══ NOW PLAYING SECTION ═══ */}
         <div style={{ display: 'flex', gap: 24, alignItems: 'center', marginBottom: 28, flexWrap: 'wrap' }}>

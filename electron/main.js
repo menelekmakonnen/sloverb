@@ -268,13 +268,14 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
         let isPlaylist = false;
         try {
             const parsed = new URL(validUrl);
-            if (parsed.hostname.includes('youtube.com')) {
+            if (parsed.hostname.includes('music.youtube.com') || parsed.hostname.includes('youtube.com')) {
                 const v = parsed.searchParams.get('v');
                 const list = parsed.searchParams.get('list');
                 if (list) { cleanUrl = `https://www.youtube.com/playlist?list=${list}`; isPlaylist = true; }
                 else if (v) cleanUrl = `https://www.youtube.com/watch?v=${v}`;
             } else if (parsed.hostname.includes('youtu.be')) {
-                cleanUrl = `https://www.youtube.com/watch?v=${parsed.pathname.slice(1)}`;
+                const videoId = parsed.pathname.slice(1).split('?')[0];
+                cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
             }
         } catch (e) {
             console.error("URL Parsing failed:", e);
@@ -283,7 +284,6 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
         const downloadDir = getDownloadDir();
         if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir, { recursive: true });
 
-        // Step 1: Get video/playlist info
         console.log('[YouTube] Fetching info for:', cleanUrl);
         event.sender.send('youtube-download-progress', 'Fetching info from YouTube...');
         
@@ -298,7 +298,6 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
         }
         
         const info = await youtubedl(cleanUrl, infoFlags);
-
         const entries = info._type === 'playlist' && info.entries ? info.entries : [info];
         const results = [];
         
@@ -308,45 +307,43 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
             const entry = entries[i];
             if (!entry) continue;
             
-            const title = entry.title ? entry.title.replace(/[^\w\s\-()\[\]]/g, '').trim() : `youtube_${Date.now()}`;
+            const title = entry.title ? entry.title.replace(/[^\w\s\-\(\)\[\]]/g, '').trim() : `youtube_${Date.now()}`;
             const safeTitle = title.substring(0, 80);
-            const stamp = Date.now();
-            const outPath = path.join(downloadDir, `${safeTitle}.%(ext)s`);
-            const entryUrl = entry.webpage_url || entry.url || entry.id
-                ? `https://www.youtube.com/watch?v=${entry.id}`
-                : cleanUrl;
+            const artist = entry.uploader || entry.artist || entry.channel || 'Unknown Artist';
+            const outPath = path.join(downloadDir, safeTitle + '.%(ext)s');
+            
+            let entryUrl;
+            if (entry.webpage_url) entryUrl = entry.webpage_url;
+            else if (entry.url && entry.url.startsWith('http')) entryUrl = entry.url;
+            else if (entry.id) entryUrl = `https://www.youtube.com/watch?v=${entry.id}`;
+            else entryUrl = cleanUrl;
 
-            console.log(`[YouTube] Downloading (${i+1}/${entries.length}):`, safeTitle);
+            console.log(`[YouTube] Downloading (${i+1}/${entries.length}):`  , safeTitle);
             if (entries.length > 1) {
                 event.sender.send('youtube-download-progress', `Downloading ${i+1} of ${entries.length}: ${safeTitle}...`);
             } else {
                 event.sender.send('youtube-download-progress', `Downloading: ${safeTitle}...`);
             }
 
-            // Step 2: Download and extract audio as m4a
             try {
                 await youtubedl(entryUrl, {
-                    extractAudio: true,
-                    audioFormat: 'm4a',
-                    audioQuality: 0,
+                    format: 'bestaudio',
                     output: outPath,
                     noPlaylist: true,
                     noCheckCertificates: true,
                     noWarnings: true,
                 });
 
-                // Step 3: Find the output file
                 const dirFiles = fs.readdirSync(downloadDir);
                 const outputFile = dirFiles.find(f => f.startsWith(safeTitle) && !f.endsWith('.part'));
 
                 if (outputFile) {
                     const filepath = path.join(downloadDir, outputFile);
                     console.log('[YouTube] Downloaded:', filepath);
-                    results.push({ title: safeTitle, path: filepath, id: filepath });
+                    results.push({ title: safeTitle, path: filepath, id: filepath, artist });
                 }
             } catch (dlErr) {
                 console.error(`[YouTube] Failed to download ${safeTitle}:`, dlErr.message);
-                // Continue with other entries if one fails
             }
         }
         
@@ -354,13 +351,14 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
             throw new Error('Download completed but no output files were found');
         }
 
-        return results; // Return array of { title, path, id }
+        return results;
 
     } catch (e) {
         console.error("[YouTube] Fetch Error:", e.message || e);
         throw new Error(`YouTube download failed: ${e.message || 'Unknown error'}`);
     }
 });
+
 
 ipcMain.handle('locate-file', async (event, targetPath) => {
     if (fs.existsSync(targetPath)) {

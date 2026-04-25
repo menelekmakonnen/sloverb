@@ -195,13 +195,15 @@ export default function SpaceBackground() {
       // ── Camera movement ──
       if (adventureActive) {
         if (!wormholeActive) {
-          cam.noiseT += 0.003 + energy * 0.008;
+          cam.noiseT += 0.003 + energy * 0.01;
           // Smooth noise-based direction (non-predictable, non-circular)
           const nx = smoothRandom(cam.noiseT, 1) - 0.5;
           const ny = smoothRandom(cam.noiseT * 0.7, 2) - 0.5;
-          const speed = 0.004 + energy * 0.012 + bass * 0.008;
-          cam.vx += (nx * speed - cam.vx) * 0.015;
-          cam.vy += (ny * speed - cam.vy) * 0.015;
+          const speed = 0.005 + energy * 0.018 + bass * 0.012;
+          cam.vx += (nx * speed - cam.vx) * 0.02;
+          cam.vy += (ny * speed - cam.vy) * 0.02;
+          // Subtle zoom pulse on beat
+          cam.zoom += (1.0 + bass * 0.15 - cam.zoom) * 0.03;
         }
       } else {
         // Idle: gentle sinusoidal float
@@ -486,11 +488,12 @@ export default function SpaceBackground() {
           const s = toScreen(stWorldX, stWorldY, st.z);
           if (!s.visible) return;
           
-          // Very gentle twinkling — slow and subtle
+          // Very gentle twinkling — slow and subtle, with soft music shimmer
           const twinkle = 0.55 + 0.15 * Math.sin(time * st.twinkleSpeed + st.twinklePhase);
-          const renderSize = st.size * Math.max(0.2, Math.pow(st.z, 1.5)) * Math.max(1, cam.zoom * 0.8);
+          const shimmer = energy * 0.12;
+          const renderSize = (st.size + shimmer) * Math.max(0.2, Math.pow(st.z, 1.5)) * Math.max(1, cam.zoom * 0.8);
           
-          ctx.fillStyle = `hsla(${st.hue}, 25%, 85%, ${twinkle})`;
+          ctx.fillStyle = `hsla(${st.hue}, 25%, ${82 + energy * 12}%, ${twinkle + shimmer * 0.3})`;
           
           // Draw streak only during wormhole, otherwise round dots
           if (wormholeActive) {
