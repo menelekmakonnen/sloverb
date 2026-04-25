@@ -254,6 +254,40 @@ class PlaybackEngine {
       } catch (e) { console.error('Failed to play next item', e); }
     }
   }
+
+  async playPrev() {
+    const store = usePlayerStore.getState();
+    const hist = useLibraryStore.getState().playHistory;
+    
+    // If we've listened for more than 3 seconds, just restart current song
+    if (store.currentTime > 3) {
+      this.seek(0);
+      return;
+    }
+
+    // `playHistory[0]` is usually the current song, so `playHistory[1]` is the previous.
+    if (hist && hist.length > 1) {
+      const prevItem = hist[1];
+      if (window.electronAPI && prevItem) {
+        try {
+          const buffer = await window.electronAPI.readFile(prevItem.path || prevItem.id);
+          const isVid = prevItem.name?.endsWith('.mp4') || prevItem.type === 'video';
+          const f = new File([buffer], prevItem.name, { type: isVid ? 'video/mp4' : 'audio/wav' });
+          f.path = prevItem.path || prevItem.id;
+          
+          // Re-queue the current song to the top of the queue so it's not lost
+          const currentTrack = store.currentTrack;
+          if (currentTrack) {
+             store.setQueue([currentTrack, ...store.queue]);
+          }
+
+          await this.loadFileAndPlay(f, prevItem);
+        } catch (e) { console.error('Failed to play previous item', e); }
+      }
+    } else {
+      this.seek(0);
+    }
+  }
 }
 
 export const playbackEngine = new PlaybackEngine();

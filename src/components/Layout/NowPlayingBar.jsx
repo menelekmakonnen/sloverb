@@ -83,7 +83,7 @@ export default function NowPlayingBar() {
       >
         {/* LEFT: Playback Controls & Time */}
         <div onClick={e => e.stopPropagation()} style={{ flex: '1', display: 'flex', alignItems: 'center', gap: 24, cursor: 'default' }}>
-          <button style={{ color: 'rgba(255,255,255,0.7)', padding: 6, transition: 'color 0.2s, transform 0.2s' }} onMouseEnter={e => {e.currentTarget.style.color='#fff'; e.currentTarget.style.transform='scale(1.1)'}} onMouseLeave={e => {e.currentTarget.style.color='rgba(255,255,255,0.7)'; e.currentTarget.style.transform='scale(1)'}}>
+          <button onClick={() => playbackEngine.playPrev()} style={{ color: 'rgba(255,255,255,0.7)', padding: 6, transition: 'color 0.2s, transform 0.2s' }} onMouseEnter={e => {e.currentTarget.style.color='#fff'; e.currentTarget.style.transform='scale(1.1)'}} onMouseLeave={e => {e.currentTarget.style.color='rgba(255,255,255,0.7)'; e.currentTarget.style.transform='scale(1)'}}>
             <SkipBack size={24} />
           </button>
           

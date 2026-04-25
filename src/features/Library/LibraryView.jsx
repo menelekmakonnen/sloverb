@@ -7,6 +7,7 @@ import { Music, Video, Disc3, Play, FolderOpen, Search, Trash2 } from 'lucide-re
 import ArtThumb from '../../components/ArtThumb';
 import FilterDrawer from '../../components/FilterDrawer';
 import { playbackEngine } from '../../lib/playbackEngine';
+import { detectBPM } from '../../lib/audioEngine';
 
 export default function LibraryView() {
   const { songs, sortBy, setSortBy, searchQuery, setSearchQuery, getSortedSongs, loadFromDisk } = useLibraryStore();
@@ -15,6 +16,9 @@ export default function LibraryView() {
   const sorted = getSortedSongs();
   const [filteredSongs, setFilteredSongs] = useState(null);
   const displaySongs = filteredSongs || sorted;
+
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState('');
 
   const handlePlayAll = async (tracks) => {
     if (!tracks || tracks.length === 0 || !window.electronAPI) return;
@@ -66,6 +70,44 @@ export default function LibraryView() {
     addToast('Removed from library', 'info');
   };
 
+  const handleScanBPM = async () => {
+    if (isScanning || !window.electronAPI) return;
+    const unscanned = songs.filter(s => !s.bpm && !s.name?.endsWith('.mp4') && s.type !== 'video');
+    if (unscanned.length === 0) {
+      addToast('All audio tracks already have BPM data', 'info');
+      return;
+    }
+    
+    setIsScanning(true);
+    let done = 0;
+    
+    for (const song of unscanned) {
+      setScanProgress(`Scanning BPM: ${done}/${unscanned.length}`);
+      try {
+        const buffer = await window.electronAPI.readFile(song.path || song.id);
+        const f = new File([buffer], song.name, { type: 'audio/wav' });
+        const arrBuf = await f.arrayBuffer();
+        
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const decoded = await ctx.decodeAudioData(arrBuf);
+        const bpm = await detectBPM(decoded);
+        
+        // Update song directly in memory
+        song.bpm = bpm;
+      } catch (e) {
+        console.error('Failed to get BPM for', song.name, e);
+      }
+      done++;
+    }
+    
+    // Save the entire updated library memory to disk
+    await useLibraryStore.getState().saveToDisk();
+    await loadFromDisk();
+    setIsScanning(false);
+    setScanProgress('');
+    addToast('BPM scanning complete!', 'success');
+  };
+
   return (
     <div style={{ height: '100%', overflow: 'auto', padding: '24px 28px', position: 'relative' }}>
       <FilterDrawer songs={songs} onFilter={setFilteredSongs} onPlayAll={handlePlayAll} />
@@ -96,9 +138,14 @@ export default function LibraryView() {
               <option value="random">Shuffle</option>
             </select>
             {window.electronAPI && (
-              <button onClick={handleLoadFolder} className="btn btn-accent-soft">
-                <FolderOpen size={14} /> Import Folder
-              </button>
+              <>
+                <button onClick={handleScanBPM} disabled={isScanning} className="btn btn-accent-soft" style={{ opacity: isScanning ? 0.7 : 1 }}>
+                  {isScanning ? scanProgress : 'Scan BPM'}
+                </button>
+                <button onClick={handleLoadFolder} className="btn btn-primary">
+                  <FolderOpen size={14} /> Import Folder
+                </button>
+              </>
             )}
           </div>
         </div>

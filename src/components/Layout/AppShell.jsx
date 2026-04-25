@@ -9,7 +9,7 @@ import ScrollNav from '../ScrollNav';
 import { useUIStore } from '../../stores/uiStore';
 import { usePlayerStore } from '../../stores/playerStore';
 import { PRESETS } from '../../lib/audioEngine.js';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import StudioView from '../../features/Studio/StudioView';
@@ -26,6 +26,15 @@ export default function AppShell() {
   const { activeView, mode, creditsTrack, setCreditsTrack, studioDrawerOpen, setStudioDrawerOpen, spaceAdventure } = useUIStore();
   const immersive = spaceAdventure === 'immersive';
   const { fileName, currentTrack } = usePlayerStore();
+  
+  const [showMetadata, setShowMetadata] = useState(true);
+
+  useEffect(() => {
+    if (!immersive) return;
+    setShowMetadata(true);
+    const t = setTimeout(() => setShowMetadata(false), 5000);
+    return () => clearTimeout(t);
+  }, [fileName, immersive]);
 
   // Global scroll wheel → volume control (Ctrl+scroll to avoid hijacking page scroll)
   useEffect(() => {
@@ -156,31 +165,33 @@ export default function AppShell() {
             position: 'fixed', top: 40, left: 40, zIndex: 55,
             display: 'flex', flexDirection: 'column', gap: 6,
             pointerEvents: 'none',
-            textShadow: '0 2px 12px rgba(0,0,0,0.8)'
+            textShadow: '0 2px 12px rgba(0,0,0,0.8)',
+            opacity: showMetadata ? 1 : 0,
+            transition: 'opacity 0.8s ease'
           }}>
             {fileName && (
-              <div style={{ fontSize: 28, fontWeight: 800, color: '#fff', letterSpacing: '-0.5px' }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: '-0.3px' }}>
                 {fileName}
               </div>
             )}
             {currentTrack?.artist && (
-              <div style={{ fontSize: 16, color: 'rgba(255,255,255,0.8)', fontWeight: 500 }}>
+              <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.8)', fontWeight: 500 }}>
                 {currentTrack.artist}
               </div>
             )}
             {currentTrack?.album && (
-              <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>
                 Album: {currentTrack.album}
               </div>
             )}
             {currentTrack?.year && (
-              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)' }}>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
                 Released: {currentTrack.year}
               </div>
             )}
             {currentTrack?.links && currentTrack.links.map((link, i) => (
               <a key={i} href={link.url} target="_blank" rel="noreferrer" style={{
-                fontSize: 13, color: 'var(--primary)', pointerEvents: 'auto', textDecoration: 'none', marginTop: 4
+                fontSize: 12, color: 'var(--primary)', pointerEvents: 'auto', textDecoration: 'none', marginTop: 4
               }}>
                 {link.label || link.url}
               </a>
@@ -243,12 +254,14 @@ export default function AppShell() {
               e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)';
               e.currentTarget.style.boxShadow = '0 12px 48px rgba(0,0,0,0.6)';
               e.currentTarget.style.backdropFilter = 'blur(24px)';
+              setShowMetadata(true); // Fade in metadata on hover
             }}
             onMouseLeave={e => {
               e.currentTarget.style.background = 'rgba(10, 10, 30, 0.0)';
               e.currentTarget.style.borderColor = 'rgba(255,255,255,0.0)';
               e.currentTarget.style.boxShadow = 'none';
               e.currentTarget.style.backdropFilter = 'blur(0px)';
+              setShowMetadata(false); // Fade out metadata when leave
             }}
           >
             {/* Audio Presets Strip */}

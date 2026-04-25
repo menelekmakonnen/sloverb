@@ -119,6 +119,83 @@ export function encodeWAV(audioBuffer) {
   return buffer;
 }
 
+// ═══════════════════════════════════════════════
+// BPM Detection Engine
+// ═══════════════════════════════════════════════
+
+export async function detectBPM(audioBuffer) {
+  try {
+    const data = audioBuffer.getChannelData(0);
+    const sampleRate = audioBuffer.sampleRate;
+    
+    // 1. Offline context to lowpass filter (isolate kick/bass)
+    const offlineCtx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, data.length, sampleRate);
+    const source = offlineCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    
+    const filter = offlineCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 150;
+    
+    source.connect(filter);
+    filter.connect(offlineCtx.destination);
+    source.start(0);
+    
+    const filteredBuffer = await offlineCtx.startRendering();
+    const filteredData = filteredBuffer.getChannelData(0);
+    
+    // 2. Peak detection
+    let peaks = [];
+    let threshold = 0.9;
+    const minThreshold = 0.3;
+    const minPeakDist = sampleRate * 0.25; // max 240 bpm
+    
+    while (peaks.length < 15 && threshold >= minThreshold) {
+        peaks = [];
+        for (let i = 0; i < filteredData.length; i++) {
+            if (filteredData[i] > threshold) {
+                peaks.push(i);
+                i += minPeakDist; // Skip forward to avoid double-counting the same peak
+            }
+        }
+        threshold -= 0.05;
+    }
+    
+    if (peaks.length < 2) return 0;
+    
+    // 3. Interval calculation
+    const intervals = {};
+    for (let i = 1; i < peaks.length; i++) {
+        for (let j = 0; j < i; j++) {
+            const diff = peaks[i] - peaks[j];
+            let tempo = 60 / (diff / sampleRate);
+            
+            // Normalize tempo to 70-160 range
+            while (tempo < 70) tempo *= 2;
+            while (tempo > 160) tempo /= 2;
+            tempo = Math.round(tempo);
+            
+            intervals[tempo] = (intervals[tempo] || 0) + 1;
+        }
+    }
+    
+    // 4. Find most common interval
+    let maxCount = 0;
+    let bpm = 0;
+    for (const t in intervals) {
+        if (intervals[t] > maxCount) {
+            maxCount = intervals[t];
+            bpm = parseInt(t);
+        }
+    }
+    
+    return bpm || 0;
+  } catch (err) {
+    console.error('BPM Detection failed:', err);
+    return 0;
+  }
+}
+
 export const PRESETS = {
   "Slowed": { speed: 0.80, reverbMix: 0.15, reverbDecay: 3, reverbSize: 2.5, bassBoost: 3, warmth: 2, stereoWidth: 0.3, preDelay: 0.02, vinyl: 0, preservePitch: false },
   "Slowed + Reverb": { speed: 0.78, reverbMix: 0.45, reverbDecay: 4, reverbSize: 3.5, bassBoost: 4, warmth: 3, stereoWidth: 0.5, preDelay: 0.05, vinyl: 0.1, preservePitch: false },

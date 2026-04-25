@@ -127,7 +127,7 @@ export default function SpaceBackground() {
     const fgStars = [];
     for (let i = 0; i < 800; i++) {
       fgStars.push({
-        x: Math.random() * 30, y: Math.random() * 30,
+        x: (Math.random() - 0.5) * 6, y: (Math.random() - 0.5) * 4,
         z: 0.1 + Math.random() * 1.5, size: 0.4 + Math.random() * 1.2,
         twinklePhase: Math.random() * Math.PI * 2,
         hue: 190 + Math.random() * 80,
@@ -464,11 +464,14 @@ export default function SpaceBackground() {
           // Reset to distant background if it flies past the camera
           if (st.z > 2.0) {
              st.z = 0.1;
-             st.x = cam.x + (Math.random() - 0.5) * 30;
-             st.y = cam.y + (Math.random() - 0.5) * 30;
+             st.x = (Math.random() - 0.5) * 6;
+             st.y = (Math.random() - 0.5) * 4;
           }
 
-          const s = toScreen(st.x, st.y, st.z);
+          // Anchor stars directly around camera coordinates to ensure visibility
+          const stWorldX = cam.x + st.x;
+          const stWorldY = cam.y + st.y;
+          const s = toScreen(stWorldX, stWorldY, st.z);
           if (!s.visible) return;
           
           const twinkle = 0.3 + 0.4 * Math.sin(time * 3 * st.z + st.twinklePhase);
@@ -477,9 +480,9 @@ export default function SpaceBackground() {
           
           ctx.fillStyle = `hsla(${st.hue}, 30%, 85%, ${twinkle + shimmer})`;
           
-          // Draw streak instead of dot if moving very fast (wormhole/high energy)
-          if (wormholeActive || energy > 0.7) {
-             const stretch = (energy * 10) + (wormholeActive ? 40 : 0);
+          // Draw streak only during wormhole
+          if (wormholeActive) {
+             const stretch = 40;
              ctx.fillRect(s.x, s.y, renderSize, renderSize + stretch * st.z);
           } else {
              ctx.fillRect(s.x, s.y, renderSize, renderSize);
