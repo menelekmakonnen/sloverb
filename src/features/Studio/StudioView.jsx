@@ -225,9 +225,11 @@ export default function StudioView() {
               name: item.title,
               title: item.title,
               path: item.path,
-              type: 'audio',
+              type: item.type || 'audio',
               artist: item.artist || 'YouTube',
-              duration: 0,
+              album: item.album || '',
+              duration: item.duration || 0,
+              date: item.date || '',
               timestamp: Date.now()
           });
       }
@@ -253,9 +255,9 @@ export default function StudioView() {
     const first = results[0];
     try {
       const rawBuffer = await window.electronAPI.readFile(first.path);
-      const ext = (first.path || '').split('.').pop()?.toLowerCase() || 'webm';
-      const mimeMap = { mp3: 'audio/mpeg', m4a: 'audio/mp4', webm: 'audio/webm', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav' };
-      const mime = mimeMap[ext] || 'audio/webm';
+      const ext = (first.path || '').split('.').pop()?.toLowerCase() || 'mp4';
+      const mimeMap = { mp3: 'audio/mpeg', m4a: 'audio/mp4', mp4: 'video/mp4', webm: 'audio/webm', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav' };
+      const mime = mimeMap[ext] || 'video/mp4';
       const f = new File([rawBuffer], `${first.title}.${ext}`, { type: mime });
       f.path = first.path;
       await handleFile(f);

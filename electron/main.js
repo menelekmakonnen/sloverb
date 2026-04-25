@@ -307,10 +307,19 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
             const entry = entries[i];
             if (!entry) continue;
             
-            const title = entry.title ? entry.title.replace(/[^\w\s\-\(\)\[\]]/g, '').trim() : `youtube_${Date.now()}`;
-            const safeTitle = title.substring(0, 80);
-            const artist = entry.uploader || entry.artist || entry.channel || 'Unknown Artist';
-            const outPath = path.join(downloadDir, safeTitle + '.%(ext)s');
+            const rawTitle = entry.title ? entry.title.replace(/[^\w\s\-()\[\],.&']/g, '').trim() : `youtube_${Date.now()}`;
+            const artist = (entry.artist || entry.uploader || entry.channel || 'Unknown Artist').replace(/[^\w\s\-,.&']/g, '').trim();
+            const uploadDate = entry.upload_date || ''; // YYYYMMDD
+            const formattedDate = uploadDate ? `${uploadDate.slice(0,4)}-${uploadDate.slice(4,6)}-${uploadDate.slice(6,8)}` : '';
+            const album = entry.album || '';
+            const duration = entry.duration || 0;
+            
+            // Build rich filename: "Artist - Title [2024-01-15]"
+            let fileName = artist !== 'Unknown Artist' ? `${artist} - ${rawTitle}` : rawTitle;
+            if (formattedDate) fileName += ` [${formattedDate}]`;
+            const safeFileName = fileName.substring(0, 120).replace(/[<>:"/\\|?*]/g, '');
+            
+            const outPath = path.join(downloadDir, safeFileName + '.%(ext)s');
             
             let entryUrl;
             if (entry.webpage_url) entryUrl = entry.webpage_url;
@@ -318,16 +327,18 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
             else if (entry.id) entryUrl = `https://www.youtube.com/watch?v=${entry.id}`;
             else entryUrl = cleanUrl;
 
-            console.log(`[YouTube] Downloading (${i+1}/${entries.length}):`  , safeTitle);
+            console.log(`[YouTube] Downloading (${i+1}/${entries.length}):`, safeFileName);
             if (entries.length > 1) {
-                event.sender.send('youtube-download-progress', `Downloading ${i+1} of ${entries.length}: ${safeTitle}...`);
+                event.sender.send('youtube-download-progress', `Downloading ${i+1} of ${entries.length}: ${rawTitle}...`);
             } else {
-                event.sender.send('youtube-download-progress', `Downloading: ${safeTitle}...`);
+                event.sender.send('youtube-download-progress', `Downloading: ${rawTitle}...`);
             }
 
             try {
+                // Download best video+audio as mp4
                 await youtubedl(entryUrl, {
-                    format: 'bestaudio',
+                    format: 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                    mergeOutputFormat: 'mp4',
                     output: outPath,
                     noPlaylist: true,
                     noCheckCertificates: true,
@@ -335,15 +346,43 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
                 });
 
                 const dirFiles = fs.readdirSync(downloadDir);
-                const outputFile = dirFiles.find(f => f.startsWith(safeTitle) && !f.endsWith('.part'));
+                const outputFile = dirFiles.find(f => f.startsWith(safeFileName.substring(0, 30)) && !f.endsWith('.part'));
 
                 if (outputFile) {
                     const filepath = path.join(downloadDir, outputFile);
                     console.log('[YouTube] Downloaded:', filepath);
-                    results.push({ title: safeTitle, path: filepath, id: filepath, artist });
+                    results.push({
+                        title: rawTitle,
+                        path: filepath,
+                        id: filepath,
+                        artist,
+                        album,
+                        date: formattedDate,
+                        duration,
+                        type: 'video',
+                    });
                 }
             } catch (dlErr) {
-                console.error(`[YouTube] Failed to download ${safeTitle}:`, dlErr.message);
+                console.error(`[YouTube] Failed to download ${rawTitle}:`, dlErr.message);
+                // Fallback: try downloading without merge (no ffmpeg)
+                try {
+                    await youtubedl(entryUrl, {
+                        format: 'best[ext=mp4]/best',
+                        output: outPath,
+                        noPlaylist: true,
+                        noCheckCertificates: true,
+                        noWarnings: true,
+                    });
+                    const dirFiles = fs.readdirSync(downloadDir);
+                    const outputFile = dirFiles.find(f => f.startsWith(safeFileName.substring(0, 30)) && !f.endsWith('.part'));
+                    if (outputFile) {
+                        const filepath = path.join(downloadDir, outputFile);
+                        console.log('[YouTube] Downloaded (fallback):', filepath);
+                        results.push({ title: rawTitle, path: filepath, id: filepath, artist, album, date: formattedDate, duration, type: 'video' });
+                    }
+                } catch (fb) {
+                    console.error(`[YouTube] Fallback also failed for ${rawTitle}:`, fb.message);
+                }
             }
         }
         
@@ -355,7 +394,11 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
 
     } catch (e) {
         console.error("[YouTube] Fetch Error:", e.message || e);
-        throw new Error(`YouTube download failed: ${e.message || 'Unknown error'}`);
+        const msg = e.message || 'Unknown error';
+        if (msg.includes('Sign in') || msg.includes('bot')) {
+            throw new Error('YouTube is requesting sign-in verification. Try again in a few minutes, or use a different link.');
+        }
+        throw new Error(`YouTube download failed: ${msg}`);
     }
 });
 

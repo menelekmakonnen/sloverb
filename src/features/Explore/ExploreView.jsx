@@ -167,9 +167,11 @@ function QuickYouTubeInput() {
               name: item.title,
               title: item.title,
               path: item.path,
-              type: 'audio',
+              type: item.type || 'audio',
               artist: item.artist || 'YouTube',
-              duration: 0,
+              album: item.album || '',
+              duration: item.duration || 0,
+              date: item.date || '',
               timestamp: Date.now()
           });
       }
@@ -177,9 +179,9 @@ function QuickYouTubeInput() {
       // Play first track
       const result = results[0];
       const rawBuffer = await window.electronAPI.readFile(result.path);
-      const ext = (result.path || '').split('.').pop()?.toLowerCase() || 'webm';
-      const mimeMap = { mp3: 'audio/mpeg', m4a: 'audio/mp4', webm: 'audio/webm', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav' };
-      const mime = mimeMap[ext] || 'audio/webm';
+      const ext = (result.path || '').split('.').pop()?.toLowerCase() || 'mp4';
+      const mimeMap = { mp3: 'audio/mpeg', m4a: 'audio/mp4', mp4: 'video/mp4', webm: 'audio/webm', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav' };
+      const mime = mimeMap[ext] || 'video/mp4';
       
       const file = new File([rawBuffer], `${result.title}.${ext}`, { type: mime });
       file.path = result.path;

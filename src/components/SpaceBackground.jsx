@@ -125,13 +125,13 @@ export default function SpaceBackground() {
 
     // ── True 3D Starfield (parallax + forward flight) ──
     const fgStars = [];
-    for (let i = 0; i < 2000; i++) {
+    for (let i = 0; i < 1200; i++) {
       fgStars.push({
         x: (Math.random() - 0.5) * 8, y: (Math.random() - 0.5) * 6,
         z: 0.05 + Math.random() * 1.8, size: 0.3 + Math.random() * 1.0,
-        twinkleSpeed: 0.2 + Math.random() * 0.5,  // Slow twinkle
+        twinkleSpeed: 0.2 + Math.random() * 0.5,
         twinklePhase: Math.random() * Math.PI * 2,
-        hue: 190 + Math.random() * 80,
+        brightness: 0.4 + Math.random() * 0.5,
       });
     }
 
@@ -342,65 +342,44 @@ export default function SpaceBackground() {
           const s = toScreen(g.x, g.y, 0.3);
           if (!s.visible) return;
           const sz = g.size * W * 0.35 * cam.zoom;
+          if (sz < 3) return; // Too small to see — skip entirely
           const tilt = g.tilt || 0.5;
           
           if (g.type === 'spiral') {
-            // Spiral arms with dense star clusters
             for (let arm = 0; arm < g.arms; arm++) {
               const armAngle = g.angle + (arm * Math.PI * 2) / g.arms;
-              for (let p = 0; p < 40; p++) {
-                const t = p / 40;
+              ctx.fillStyle = `hsla(${g.hue}, 50%, 65%, 0.1)`;
+              for (let p = 0; p < 25; p++) {
+                const t = p / 25;
                 const spiral = armAngle + t * 3.5;
                 const r = t * sz;
                 const px = s.x + Math.cos(spiral) * r;
                 const py = s.y + Math.sin(spiral) * r * tilt;
-                const dotR = (0.4 + t * 1.2 + (1 - t) * 0.6) * Math.max(1, cam.zoom * 0.5);
-                ctx.beginPath(); ctx.arc(px, py, dotR, 0, Math.PI * 2);
-                ctx.fillStyle = `hsla(${g.hue + t * 50}, 55%, 65%, ${0.12 * (1 - t * 0.4)})`;
-                ctx.fill();
-                // Scatter dust between arms
-                if (p % 3 === 0) {
-                  const jx = px + (Math.random() - 0.5) * sz * 0.15;
-                  const jy = py + (Math.random() - 0.5) * sz * 0.1;
-                  ctx.beginPath(); ctx.arc(jx, jy, (0.3 + Math.random() * 0.4) * Math.max(1, cam.zoom * 0.5), 0, Math.PI * 2);
-                  ctx.fillStyle = `hsla(${g.hue + 20}, 40%, 55%, 0.04)`;
-                  ctx.fill();
-                }
+                const dotR = (0.4 + t * 1.0) * Math.max(1, cam.zoom * 0.5);
+                ctx.beginPath(); ctx.arc(px, py, dotR, 0, Math.PI * 2); ctx.fill();
               }
             }
           } else if (g.type === 'elliptical') {
-             // Elliptical blob
-             for (let p = 0; p < 150; p++) {
-                const a = Math.random() * Math.PI * 2;
-                const r = Math.pow(Math.random(), 2) * sz * 0.6;
-                const px = s.x + Math.cos(a + g.angle) * r;
-                const py = s.y + Math.sin(a + g.angle) * r * tilt;
-                ctx.beginPath(); ctx.arc(px, py, (0.5 + Math.random()) * Math.max(1, cam.zoom * 0.5), 0, Math.PI * 2);
-                ctx.fillStyle = `hsla(${g.hue + Math.random()*20}, 40%, 75%, ${0.05 + Math.random() * 0.05})`;
-                ctx.fill();
-             }
+             // Pre-seeded positions (no per-frame random)
+             if (!g._pts) { g._pts = []; for (let p = 0; p < 60; p++) g._pts.push({ a: Math.random() * Math.PI * 2, r: Math.pow(Math.random(), 2) * 0.6, s: 0.5 + Math.random() }); }
+             ctx.fillStyle = `hsla(${g.hue}, 40%, 75%, 0.06)`;
+             g._pts.forEach(pt => {
+                ctx.beginPath(); ctx.arc(s.x + Math.cos(pt.a + g.angle) * pt.r * sz, s.y + Math.sin(pt.a + g.angle) * pt.r * sz * tilt, pt.s * Math.max(1, cam.zoom * 0.5), 0, Math.PI * 2); ctx.fill();
+             });
           } else {
-             // Irregular
-             for (let p = 0; p < 80; p++) {
-                const ox = (Math.random() - 0.5) * sz * 0.8;
-                const oy = (Math.random() - 0.5) * sz * 0.8 * tilt;
-                ctx.beginPath(); ctx.arc(s.x + ox, s.y + oy, (1 + Math.random() * 2) * Math.max(1, cam.zoom * 0.5), 0, Math.PI * 2);
-                ctx.fillStyle = `hsla(${g.hue + ox}, 50%, 65%, ${0.03 + Math.random() * 0.04})`;
-                ctx.fill();
-             }
+             if (!g._pts) { g._pts = []; for (let p = 0; p < 40; p++) g._pts.push({ ox: (Math.random() - 0.5) * 0.8, oy: (Math.random() - 0.5) * 0.8, s: 1 + Math.random() * 2 }); }
+             ctx.fillStyle = `hsla(${g.hue}, 50%, 65%, 0.04)`;
+             g._pts.forEach(pt => {
+                ctx.beginPath(); ctx.arc(s.x + pt.ox * sz, s.y + pt.oy * sz * tilt, pt.s * Math.max(1, cam.zoom * 0.5), 0, Math.PI * 2); ctx.fill();
+             });
           }
 
-          // Core glow (bright center)
+          // Core glow only (skip outer halo for perf)
           const cg = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, sz * 0.2);
           cg.addColorStop(0, `hsla(${g.hue + 10}, 50%, 85%, 0.2)`);
-          cg.addColorStop(0.4, `hsla(${g.hue}, 40%, 65%, 0.08)`);
+          cg.addColorStop(0.5, `hsla(${g.hue}, 40%, 65%, 0.06)`);
           cg.addColorStop(1, 'transparent');
           ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(s.x, s.y, sz * 0.2, 0, Math.PI * 2); ctx.fill();
-          // Outer halo
-          const oh = ctx.createRadialGradient(s.x, s.y, sz * 0.15, s.x, s.y, sz * 0.5);
-          oh.addColorStop(0, `hsla(${g.hue}, 30%, 50%, 0.03)`);
-          oh.addColorStop(1, 'transparent');
-          ctx.fillStyle = oh; ctx.beginPath(); ctx.arc(s.x, s.y, sz * 0.5, 0, Math.PI * 2); ctx.fill();
         });
         ctx.restore();
       }
@@ -468,41 +447,43 @@ export default function SpaceBackground() {
           });
         });
 
-        // ── True 3D Starfield (2000 round dots) ──
+        // ── True 3D Starfield (1200 efficient dots) ──
         fgStars.forEach(st => {
-          // Move star forward based on speed to simulate 3D flight
           if (adventureActive) {
              const flightSpeed = 0.001 + energy * 0.003;
              st.z += flightSpeed * (wormholeActive ? 5 : 1);
           }
-          // Reset to distant background if it flies past the camera
           if (st.z > 2.0) {
              st.z = 0.05;
              st.x = (Math.random() - 0.5) * 8;
              st.y = (Math.random() - 0.5) * 6;
           }
 
-          // Anchor stars directly around camera coordinates to ensure visibility
           const stWorldX = cam.x + st.x;
           const stWorldY = cam.y + st.y;
           const s = toScreen(stWorldX, stWorldY, st.z);
           if (!s.visible) return;
           
-          // Very gentle twinkling — slow and subtle, with soft music shimmer
-          const twinkle = 0.55 + 0.15 * Math.sin(time * st.twinkleSpeed + st.twinklePhase);
-          const shimmer = energy * 0.12;
+          const twinkle = st.brightness + 0.12 * Math.sin(time * st.twinkleSpeed + st.twinklePhase);
+          const shimmer = energy * 0.1;
           const renderSize = (st.size + shimmer) * Math.max(0.2, Math.pow(st.z, 1.5)) * Math.max(1, cam.zoom * 0.8);
+          const alpha = Math.min(1, twinkle + shimmer * 0.3);
+          const lum = Math.floor(200 + energy * 40);
           
-          ctx.fillStyle = `hsla(${st.hue}, 25%, ${82 + energy * 12}%, ${twinkle + shimmer * 0.3})`;
-          
-          // Draw streak only during wormhole, otherwise round dots
           if (wormholeActive) {
-             const stretch = 40;
-             ctx.fillRect(s.x, s.y, renderSize, renderSize + stretch * st.z);
+             ctx.fillStyle = `rgba(${lum},${lum},255,${alpha})`;
+             ctx.fillRect(s.x, s.y, renderSize, renderSize + 40 * st.z);
           } else {
-             ctx.beginPath();
-             ctx.arc(s.x, s.y, Math.max(0.4, renderSize * 0.5), 0, Math.PI * 2);
-             ctx.fill();
+             // Use fillRect for tiny stars (much faster than arc)
+             const sz = Math.max(0.6, renderSize);
+             ctx.fillStyle = `rgba(${lum},${lum},255,${alpha})`;
+             if (sz < 1.5) {
+               ctx.fillRect(s.x, s.y, sz, sz);
+             } else {
+               ctx.beginPath();
+               ctx.arc(s.x, s.y, sz * 0.5, 0, Math.PI * 2);
+               ctx.fill();
+             }
           }
         });
         
