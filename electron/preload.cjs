@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+    windowControl: (action) => ipcRenderer.send('window-control', action),
     savePreset: (presetName, presetData) => ipcRenderer.invoke('save-preset', presetName, presetData),
     loadPresets: () => ipcRenderer.invoke('load-presets'),
     deletePreset: (presetName) => ipcRenderer.invoke('delete-preset', presetName),
@@ -16,5 +17,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     selectFolder: () => ipcRenderer.invoke('select-folder'),
     updateLibraryOrder: (lib) => ipcRenderer.invoke('update-library-order', lib),
     saveLibrary: (data) => ipcRenderer.invoke('save-library', data),
-    locateFile: (p) => ipcRenderer.invoke('locate-file', p)
+    locateFile: (p) => ipcRenderer.invoke('locate-file', p),
+    getAlbumArt: (p) => ipcRenderer.invoke('get-album-art', p),
+    setDiscordActivity: (activity) => ipcRenderer.invoke('set-discord-activity', activity),
+    onMediaPlayPause: (callback) => ipcRenderer.on('media-play-pause', callback),
+    onMediaNext: (callback) => ipcRenderer.on('media-next', callback),
+    onOpenFile: (callback) => ipcRenderer.on('open-file', callback),
+    onYoutubeProgress: (callback) => ipcRenderer.on('youtube-download-progress', callback),
+    offYoutubeProgress: (callback) => ipcRenderer.removeListener('youtube-download-progress', callback),
+    removeMediaListeners: () => {
+        ipcRenderer.removeAllListeners('media-play-pause');
+        ipcRenderer.removeAllListeners('media-next');
+        ipcRenderer.removeAllListeners('open-file');
+        ipcRenderer.removeAllListeners('youtube-download-progress');
+    }
 });

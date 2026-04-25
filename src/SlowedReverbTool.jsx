@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { extractAudioFromVideo, muxAudioToVideo } from './ffmpegProcessor.js';
+import { Sun, Moon, Music, Repeat, Pause, Play, Square, VolumeX, Volume1, Volume2, Check, Download, Settings, Disc, Video, HardDrive } from 'lucide-react';
 import '@fontsource/space-mono';
 import '@fontsource/syne';
 
@@ -399,6 +400,7 @@ export default function SlowedReverbTool() {
   const [playbackContext, setPlaybackContext] = useState({ type: 'library', playlistId: null });
   const [studioQueue, setStudioQueue] = useState([]);
   const [masterVolume, setMasterVolume] = useState(0.9);
+  const [isRepeat, setIsRepeat] = useState(false);
 
   const sortedLibrary = useMemo(() => {
     let sorted = [...library];
@@ -680,9 +682,17 @@ export default function SlowedReverbTool() {
     requestRef.current = requestAnimationFrame(animateTime);
 
     source.onended = () => {
+      if (sourceNodeRef.current !== source) return; // Ignore if stopped manually
+      
       setIsPlaying(false);
       pauseOffsetRef.current = 0;
       setCurrentTime(0);
+
+      // Handle Repeat (Loop)
+      if (isRepeat) {
+        startPlayback();
+        return;
+      }
 
       if (studioQueue.length > 0) {
         playNextInQueue();
@@ -791,6 +801,12 @@ export default function SlowedReverbTool() {
     }
   };
 
+  const stopAudio = () => {
+    stopPlayback();
+    pauseOffsetRef.current = 0;
+    if (typeof setCurrentTime === 'function') setCurrentTime(0);
+  };
+
   const handleExport = async () => {
     if (!audioBuffer) return;
     setIsExporting(true);
@@ -878,8 +894,11 @@ export default function SlowedReverbTool() {
       const data = await window.electronAPI.fetchYoutube(youtubeUrl);
       setProgress(70);
       setLoadingText("Decoding YouTube audio...");
-      const f = new File([data.buffer], `${data.title}.mp3`, { type: "audio/mp3" });
-      f.path = `youtube_${Date.now()}`; // pseudo path for library
+      const ext = (data.path || '').split('.').pop()?.toLowerCase() || 'webm';
+      const mimeMap = { mp3: 'audio/mpeg', m4a: 'audio/mp4', webm: 'audio/webm', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav' };
+      const mime = mimeMap[ext] || 'audio/webm';
+      const f = new File([data.buffer], `${data.title}.${ext}`, { type: mime });
+      f.path = data.path || `youtube_${Date.now()}`;
       await loadFile(f);
       setYoutubeUrl(""); // Clear input on success
     } catch (e) {
@@ -1018,10 +1037,7 @@ export default function SlowedReverbTool() {
     }
   };
 
-  const stopAudio = () => {
-    stopPlayback();
-    pauseOffsetRef.current = 0;
-  };
+
 
   const handleSeek = (newTime) => {
     pauseOffsetRef.current = newTime;
@@ -1074,7 +1090,7 @@ export default function SlowedReverbTool() {
           onClick={() => setTheme(isDark ? "light" : "dark")}
           style={{ position: "absolute", right: 0, top: 0, background: "transparent", border: "1px solid " + colors.cardBorder, color: colors.text, padding: "6px 12px", borderRadius: 20, cursor: "pointer", fontFamily: "'Space Mono', monospace", fontSize: 11 }}
         >
-          {isDark ? "☀️ Light Mode" : "🌙 Dark Mode"}
+          {isDark ? <span style={{display:"flex", alignItems:"center", gap: 6}}><Sun size={14}/> Light Mode</span> : <span style={{display:"flex", alignItems:"center", gap: 6}}><Moon size={14}/> Dark Mode</span>}
         </button>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
           <img src="/logo.png" alt="Sloverb Studio Logo" style={{ width: 48, height: 48, filter: "drop-shadow(0 0 8px rgba(167,139,250,0.6))", cursor: "pointer" }} onClick={() => window.location.reload()} />
@@ -1120,7 +1136,7 @@ export default function SlowedReverbTool() {
 
           {!audioBuffer ? (
             <>
-              <div style={{ fontSize: 36, marginBottom: 12 }}>🎵</div>
+              <div style={{ marginBottom: 16, display: "flex", justifyContent: "center", color: "rgba(167,139,250,0.8)" }}><Music size={42} /></div>
               <p style={{ color: "#a78bfa", fontSize: 14, fontFamily: "'Syne', sans-serif", fontWeight: 700, margin: "0 0 4px" }}>
                 {isProcessing ? loadingText : "Drop your audio or video here"}
               </p>
@@ -1152,7 +1168,7 @@ export default function SlowedReverbTool() {
           ) : (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 8, background: "rgba(167,139,250,0.15)", border: "1px solid rgba(167,139,250,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🎵</div>
+                <div style={{ width: 36, height: 36, borderRadius: 8, background: "rgba(167,139,250,0.15)", border: "1px solid rgba(167,139,250,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}><Music size={20} color="#a78bfa" /></div>
                 <div style={{ textAlign: "left" }}>
                   <p style={{ margin: 0, fontSize: 12, fontFamily: "'Syne', sans-serif", fontWeight: 700, color: colors.text, maxWidth: 250, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</p>
                   <p style={{ margin: 0, fontSize: 10, color: colors.textMuted }}>{(audioBuffer.duration / params.speed).toFixed(1)}s at {params.speed}x · {audioBuffer.numberOfChannels}ch</p>
@@ -1174,6 +1190,7 @@ export default function SlowedReverbTool() {
                 }} style={{ background: "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.4)", color: "#a78bfa", padding: "6px 12px", borderRadius: 6, fontSize: 11, cursor: "pointer", fontWeight: "bold" }}>+ Add to Library</button>
                 <button onClick={(e) => {
                   e.stopPropagation();
+                  stopAudio();
                   setAudioBuffer(null);
                   setFileName("");
                   setFile(null);
@@ -1201,7 +1218,7 @@ export default function SlowedReverbTool() {
             {studioQueue.map((item, index) => {
               const hue = (index * 40) % 360;
               return (
-                <div key={`${item.name}_${index}`} className="queue-item" draggable onDragStart={(e) => {
+                <div key={`${item.name}_${index}`} className="queue-item" draggable onDoubleClick={() => playNextInQueue(index)} onDragStart={(e) => {
                   e.dataTransfer.setData("text/plain", index.toString());
                   e.currentTarget.style.opacity = '0.5';
                 }} onDragEnd={(e) => e.currentTarget.style.opacity = '1'} onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderTop = `2px solid #a78bfa`; }} onDragLeave={(e) => { e.currentTarget.style.borderTop = "1px solid transparent"; }} onDrop={(e) => {
@@ -1280,13 +1297,14 @@ export default function SlowedReverbTool() {
 
           {/* Playback Buttons */}
           <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap", marginTop: 20 }}>
+            <button onClick={() => setIsRepeat(!isRepeat)} disabled={!audioBuffer} style={{ background: isRepeat ? "rgba(236,72,153,0.2)" : "rgba(100,100,150,0.1)", border: "1px solid " + (isRepeat ? "rgba(236,72,153,0.4)" : colors.cardBorder), color: isRepeat ? "#ec4899" : colors.text, padding: "8px 16px", borderRadius: 8, cursor: audioBuffer ? "pointer" : "not-allowed", fontSize: 13, opacity: !audioBuffer ? 0.5 : 1, fontWeight: isRepeat ? "bold" : "normal" }}><span style={{display:"flex", alignItems:"center", gap: 6}}><Repeat size={14}/> {isRepeat ? "ON" : "OFF"}</span></button>
             <button onClick={() => audioBuffer && skipTime(-15)} disabled={!audioBuffer} style={{ background: "rgba(100,100,150,0.1)", border: "1px solid " + colors.cardBorder, color: colors.text, padding: "8px 16px", borderRadius: 8, cursor: audioBuffer ? "pointer" : "not-allowed", fontSize: 13, opacity: !audioBuffer ? 0.5 : 1 }}>-15s</button>
             <button onClick={() => audioBuffer && skipTime(-5)} disabled={!audioBuffer} style={{ background: "rgba(100,100,150,0.1)", border: "1px solid " + colors.cardBorder, color: colors.text, padding: "8px 16px", borderRadius: 8, cursor: audioBuffer ? "pointer" : "not-allowed", fontSize: 13, opacity: !audioBuffer ? 0.5 : 1 }}>-5s</button>
             <button onClick={() => audioBuffer && togglePlay()} disabled={!audioBuffer} style={{ background: isPlaying ? "rgba(167,139,250,0.2)" : "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.4)", color: "#a78bfa", padding: "8px 24px", borderRadius: 8, cursor: audioBuffer ? "pointer" : "not-allowed", fontSize: 14, fontWeight: "bold", opacity: !audioBuffer ? 0.5 : 1 }}>
-              {isPlaying ? "⏸ Pause" : "▶ Play"}
+              {isPlaying ? <span style={{display:"flex", alignItems:"center", gap: 6}}><Pause size={16}/> Pause</span> : <span style={{display:"flex", alignItems:"center", gap: 6}}><Play size={16}/> Play</span>}
             </button>
             <button onClick={() => audioBuffer && stopAudio()} disabled={!audioBuffer} style={{ background: "rgba(244,114,182,0.1)", border: "1px solid rgba(244,114,182,0.4)", color: "#f472b6", padding: "8px 24px", borderRadius: 8, cursor: audioBuffer ? "pointer" : "not-allowed", fontSize: 14, fontWeight: "bold", opacity: !audioBuffer ? 0.5 : 1 }}>
-              ⏹ Stop
+              <span style={{display:"flex", alignItems:"center", gap: 6}}><Square size={16}/> Stop</span>
             </button>
             <button onClick={() => audioBuffer && skipTime(5)} disabled={!audioBuffer} style={{ background: "rgba(100,100,150,0.1)", border: "1px solid " + colors.cardBorder, color: colors.text, padding: "8px 16px", borderRadius: 8, cursor: audioBuffer ? "pointer" : "not-allowed", fontSize: 13, opacity: !audioBuffer ? 0.5 : 1 }}>+5s</button>
           </div>
@@ -1294,7 +1312,7 @@ export default function SlowedReverbTool() {
           {/* Dedicated Volume Bar Row */}
           <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 16, background: "rgba(0,0,0,0.4)", padding: "10px 20px", borderRadius: 12, border: "1px solid " + colors.cardBorder, width: "100%", maxWidth: 350 }}>
-              <span style={{ fontSize: 16, filter: masterVolume === 0 ? "grayscale(100%) opacity(50%)" : "none" }}>{masterVolume === 0 ? "🔇" : masterVolume < 0.5 ? "🔉" : "🔊"}</span>
+              <span style={{ fontSize: 16, filter: masterVolume === 0 ? "grayscale(100%) opacity(50%)" : "none" }}>{masterVolume === 0 ? <VolumeX size={20} color={masterVolume === 0 ? "#6b7280" : "#a78bfa"} /> : masterVolume < 0.5 ? <Volume1 size={20} color="#a78bfa" /> : <Volume2 size={20} color="#a78bfa" />}</span>
               <input type="range" min="0" max="1" step="0.01" value={masterVolume} onChange={e => setMasterVolume(parseFloat(e.target.value))} style={{ flex: 1, cursor: "pointer", height: 6, accentColor: "#a78bfa" }} />
               <span style={{ fontSize: 11, color: colors.textMuted, width: 32, textAlign: "right" }}>{Math.round(masterVolume * 100)}%</span>
             </div>
@@ -1409,7 +1427,7 @@ export default function SlowedReverbTool() {
                 Rendering Audio... {exportProgress}%
                 <div style={{ position: "absolute", bottom: 0, left: 0, height: 3, background: "rgba(255,255,255,0.4)", width: `${exportProgress}%`, transition: "width 0.2s ease" }} />
               </span>
-            ) : exportDone ? "✓ Downloaded!" : "⬇ Export WAV"}
+            ) : exportDone ? <span style={{display:"flex", alignItems:"center", justifyContent:"center", gap: 8}}><Check size={18}/> Downloaded!</span> : <span style={{display:"flex", alignItems:"center", justifyContent:"center", gap: 8}}><Download size={18}/> Export WAV</span>}
           </button>
 
           {/* Secondary Options Button */}
@@ -1429,7 +1447,7 @@ export default function SlowedReverbTool() {
                 transition: "all 0.2s ease",
               }}
             >
-              ⚙
+              <Settings size={22} />
             </button>
 
             {/* Dropdown Menu */}
@@ -1500,7 +1518,7 @@ export default function SlowedReverbTool() {
               {history.map(item => (
                 <div key={item.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(100,100,150,0.05)", padding: "10px 16px", borderRadius: 8, border: "1px solid " + colors.cardBorder }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ fontSize: 18 }}>💿</span>
+                    <Disc size={20} color="#a78bfa" />
                     <div>
                       <p style={{ margin: 0, fontSize: 12, color: colors.text, fontWeight: "bold" }}>{item.name}</p>
                       <p style={{ margin: 0, fontSize: 10, color: colors.textMuted }}>{new Date(item.mtime).toLocaleString()}</p>
@@ -1559,7 +1577,7 @@ export default function SlowedReverbTool() {
                   <option value="random">Randomize</option>
                 </select>
                 <button onClick={() => { if (library.length > 0) playFromLibrary(0) }} disabled={library.length === 0} style={{ background: library.length > 0 ? "rgba(167,139,250,0.15)" : "transparent", color: library.length > 0 ? "#a78bfa" : colors.textMuted, border: `1px solid ${library.length > 0 ? "#a78bfa" : colors.cardBorder}`, padding: "6px 12px", borderRadius: 8, fontSize: 11, cursor: library.length > 0 ? "pointer" : "not-allowed", fontWeight: "bold" }}>
-                  ▶ Play All
+                  <span style={{display:"flex", alignItems:"center", gap: 6}}><Play size={14}/> Play All</span>
                 </button>
                 <button onClick={() => {
                   if (window.confirm("Are you sure you want to clear your entire library?")) {
@@ -1577,7 +1595,7 @@ export default function SlowedReverbTool() {
           {activeLibraryTab === "songs" && (
             library.length === 0 ? (
               <div style={{ textAlign: "center", padding: "60px 20px" }}>
-                <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.5 }}>🎵</div>
+                <div style={{ marginBottom: 20, display: "flex", justifyContent: "center", color: "rgba(167,139,250,0.5)" }}><Music size={56} /></div>
                 <p style={{ color: colors.text, fontSize: 16, fontWeight: "bold", margin: "0 0 8px 0" }}>Your Library is Empty</p>
                 <p style={{ color: colors.textMuted, fontSize: 13, margin: "0 0 24px 0" }}>Add tracks from the Studio or Import a Folder to get started.</p>
                 {window.electronAPI && (
@@ -1616,7 +1634,7 @@ export default function SlowedReverbTool() {
                       <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
                         {/* Album Art Placeholder */}
                         <div style={{ width: 44, height: 44, borderRadius: 8, background: `linear-gradient(135deg, hsl(${hue1}, 70%, 60%), hsl(${hue2}, 70%, 40%))`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>
-                          {item.type === "raw" ? "🎵" : item.type === "video" ? "🎥" : "💿"}
+                          {item.type === "raw" ? <Music size={20} color="#fff" /> : item.type === "video" ? <Video size={20} color="#fff" /> : <Disc size={20} color="#fff" />}
                         </div>
                         <div style={{ pointerEvents: "none" }}>
                           <p style={{ margin: 0, fontSize: 14, color: playbackContext.type === 'library' && currentPlaylistIndex === originalIndex ? "#a78bfa" : colors.text, fontWeight: "bold", letterSpacing: "0.02em" }}>{item.name}</p>
@@ -1626,7 +1644,7 @@ export default function SlowedReverbTool() {
                       
                       {/* Hover Actions */}
                       <div className="lib-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", opacity: 0, transition: "opacity 0.2s ease" }}>
-                        <button onClick={() => playFromLibrary(originalIndex)} style={{ background: "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.4)", color: "#a78bfa", padding: "6px 12px", borderRadius: 20, fontSize: 11, cursor: "pointer", fontWeight: "bold", transition: "all 0.2s" }} onMouseEnter={e => e.currentTarget.style.background = "rgba(167,139,250,0.2)"} onMouseLeave={e => e.currentTarget.style.background = "rgba(167,139,250,0.1)"}>▶ Play</button>
+                        <button onClick={() => playFromLibrary(originalIndex)} style={{ background: "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.4)", color: "#a78bfa", padding: "6px 12px", borderRadius: 20, fontSize: 11, cursor: "pointer", fontWeight: "bold", transition: "all 0.2s" }} onMouseEnter={e => e.currentTarget.style.background = "rgba(167,139,250,0.2)"} onMouseLeave={e => e.currentTarget.style.background = "rgba(167,139,250,0.1)"}><span style={{display:"flex", alignItems:"center", gap:4}}><Play size={12}/> Play</span></button>
                         <button onClick={() => {
                           setStudioQueue(q => [...q, { type: 'library', libraryItem: item, name: item.name }]);
                           alert(`Added "${item.name}" to the Studio Queue`);
@@ -1687,7 +1705,7 @@ export default function SlowedReverbTool() {
               {!activePlaylistId ? (
                 playlists.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "60px 20px" }}>
-                    <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.5 }}>💽</div>
+                    <div style={{ marginBottom: 20, display: "flex", justifyContent: "center", color: "rgba(167,139,250,0.5)" }}><HardDrive size={56} /></div>
                     <p style={{ color: colors.text, fontSize: 16, fontWeight: "bold", margin: "0 0 8px 0" }}>No Playlists Yet</p>
                     <p style={{ color: colors.textMuted, fontSize: 13, margin: 0 }}>Create your first playlist and start organizing your favorite slowed tracks.</p>
                   </div>
@@ -1714,7 +1732,7 @@ export default function SlowedReverbTool() {
                             onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = "0 12px 32px rgba(167,139,250,0.4)"; e.currentTarget.querySelector('.pl-overlay').style.opacity = '1'; }}
                             onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,0.3)"; e.currentTarget.querySelector('.pl-overlay').style.opacity = '0'; }}
                           >
-                            <span style={{ fontSize: 40, filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.4))" }}>💽</span>
+                            <HardDrive size={40} color="#fff" style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.4))" }} />
                             <div className="pl-overlay" style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", opacity: 0, transition: "opacity 0.2s ease" }}>
                               <span style={{ color: "#fff", fontWeight: "bold", fontSize: 14, letterSpacing: "0.05em" }}>View Playlist</span>
                             </div>
@@ -1754,13 +1772,13 @@ export default function SlowedReverbTool() {
                   return (
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: 24, marginBottom: 32, background: `linear-gradient(135deg, rgba(10,10,25,0.8), rgba(10,10,25,0.95)), linear-gradient(135deg, hsl(${h1}, 70%, 50%), hsl(${h2}, 70%, 20%))`, padding: 24, borderRadius: 16, border: "1px solid rgba(255,255,255,0.1)" }}>
-                        <div style={{ width: 120, height: 120, borderRadius: 12, background: `linear-gradient(135deg, hsl(${h1}, 70%, 50%), hsl(${h2}, 70%, 20%))`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 48, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", flexShrink: 0 }}>💽</div>
+                        <div style={{ width: 120, height: 120, borderRadius: 12, background: `linear-gradient(135deg, hsl(${h1}, 70%, 50%), hsl(${h2}, 70%, 20%))`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 48, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", flexShrink: 0 }}><HardDrive size={56} color="#fff" /></div>
                         <div style={{ flex: 1 }}>
                           <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.2em", margin: "0 0 8px 0" }}>Playlist</p>
                           <h3 style={{ margin: "0 0 12px 0", color: "#fff", fontSize: 32, fontFamily: "'Syne', sans-serif" }}>{pl.name}</h3>
                           <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, margin: "0 0 16px 0" }}>{plSongs.length} tracks • Created via Sloverb Studio</p>
                           <button onClick={() => { if (plSongs.length > 0) playFromPlaylist(0, pl.id) }} disabled={plSongs.length === 0} style={{ background: plSongs.length > 0 ? "linear-gradient(135deg, #7c3aed, #a855f7)" : "rgba(100,100,150,0.3)", color: plSongs.length > 0 ? "#fff" : "rgba(255,255,255,0.5)", border: "none", padding: "10px 24px", borderRadius: 24, fontSize: 13, cursor: plSongs.length > 0 ? "pointer" : "not-allowed", fontWeight: "bold", transition: "transform 0.2s" }} onMouseEnter={e => { if (plSongs.length > 0) e.currentTarget.style.transform = "scale(1.05)" }} onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
-                            ▶ Play Playlist
+                            <span style={{display:"flex", alignItems:"center", justifyContent:"center", gap:8}}><Play size={16}/> Play Playlist</span>
                           </button>
                         </div>
                       </div>
@@ -1792,7 +1810,7 @@ export default function SlowedReverbTool() {
                                   </div>
                                 </div>
                                 <div className="pl-actions" style={{ display: "flex", gap: 6, opacity: 0, transition: "opacity 0.2s ease" }}>
-                                  <button onClick={() => playFromPlaylist(localIdx, pl.id)} style={{ background: "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.4)", color: "#a78bfa", padding: "6px 12px", borderRadius: 20, fontSize: 11, cursor: "pointer", fontWeight: "bold", transition: "all 0.2s" }} onMouseEnter={e => e.currentTarget.style.background = "rgba(167,139,250,0.2)"} onMouseLeave={e => e.currentTarget.style.background = "rgba(167,139,250,0.1)"}>▶ Play</button>
+                                  <button onClick={() => playFromPlaylist(localIdx, pl.id)} style={{ background: "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.4)", color: "#a78bfa", padding: "6px 12px", borderRadius: 20, fontSize: 11, cursor: "pointer", fontWeight: "bold", transition: "all 0.2s" }} onMouseEnter={e => e.currentTarget.style.background = "rgba(167,139,250,0.2)"} onMouseLeave={e => e.currentTarget.style.background = "rgba(167,139,250,0.1)"}><span style={{display:"flex", alignItems:"center", gap:4}}><Play size={12}/> Play</span></button>
                                   <button onClick={() => {
                                     setStudioQueue(q => [...q, { type: 'library', libraryItem: item, name: item.name }]);
                                     alert(`Added "${item.name}" to the Studio Queue`);
