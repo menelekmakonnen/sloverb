@@ -1,6 +1,7 @@
 import { useUIStore } from '../../stores/uiStore';
 import { motion } from 'framer-motion';
-import { Palette, Monitor, Info } from 'lucide-react';
+import { Palette, Monitor, Info, FolderOpen, Download } from 'lucide-react';
+import { useState, useEffect } from 'react';
 
 const THEMES = [
   { id: 'violet', label: 'Violet', color: '#a78bfa' },
@@ -11,7 +12,26 @@ const THEMES = [
 ];
 
 export default function SettingsView() {
-  const { theme, setTheme, mode, toggleMode } = useUIStore();
+  const { theme, setTheme, mode, toggleMode, addToast } = useUIStore();
+  const [downloadDir, setDownloadDir] = useState('');
+
+  useEffect(() => {
+    if (window.electronAPI?.getSettings) {
+      window.electronAPI.getSettings().then(s => {
+        setDownloadDir(s.downloadDir || '');
+      });
+    }
+  }, []);
+
+  const handlePickDir = async () => {
+    if (!window.electronAPI?.selectDownloadDir) return;
+    const dir = await window.electronAPI.selectDownloadDir();
+    if (dir) {
+      setDownloadDir(dir);
+      await window.electronAPI.saveSettings({ downloadDir: dir });
+      addToast(`Download folder set: ${dir}`, 'success');
+    }
+  };
 
   return (
     <div style={{ height: '100%', overflow: 'auto', padding: '24px 28px' }}>
@@ -73,6 +93,34 @@ export default function SettingsView() {
             })}
           </div>
         </div>
+
+        {/* Downloads */}
+        {window.electronAPI && (
+          <div className="glass-panel" style={{ padding: 20, marginBottom: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <Download size={16} color="var(--accent)" />
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Downloads</span>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: 'var(--bg-surface)', borderRadius: 10, border: '1px solid var(--glass-border)' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>Download Folder</p>
+                <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {downloadDir || 'Default: Windows Music folder'}
+                </p>
+              </div>
+              <button onClick={handlePickDir} className="btn" style={{
+                padding: '6px 16px', borderRadius: 20,
+                background: 'var(--accent-muted)',
+                border: '1px solid var(--border-accent)',
+                color: 'var(--accent)', fontSize: 12, fontWeight: 600,
+                flexShrink: 0,
+              }}>
+                <FolderOpen size={14} /> Browse
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* About */}
         <div className="glass-panel" style={{ padding: 20 }}>

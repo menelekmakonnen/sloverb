@@ -64,6 +64,36 @@ if (!fs.existsSync(generationsDir)) {
     fs.mkdirSync(generationsDir, { recursive: true });
 }
 
+// ── Configurable download directory ──
+const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+function getSettings() {
+    if (!fs.existsSync(settingsPath)) return {};
+    try { return JSON.parse(fs.readFileSync(settingsPath, 'utf8')); }
+    catch { return {}; }
+}
+function saveSettings(data) {
+    fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2), 'utf8');
+}
+function getDownloadDir() {
+    const settings = getSettings();
+    if (settings.downloadDir && fs.existsSync(settings.downloadDir)) return settings.downloadDir;
+    // Default: Windows Music folder
+    return app.getPath('music');
+}
+
+ipcMain.handle('get-settings', () => getSettings());
+ipcMain.handle('save-settings', (event, newSettings) => {
+    const current = getSettings();
+    const merged = { ...current, ...newSettings };
+    saveSettings(merged);
+    return merged;
+});
+ipcMain.handle('select-download-dir', async () => {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+});
+
 ipcMain.handle('save-generation', async (event, fileName, bufferData) => {
     const filePath = path.join(generationsDir, fileName);
     fs.writeFileSync(filePath, Buffer.from(bufferData));
@@ -235,12 +265,13 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
             validUrl = 'https://' + validUrl;
         }
         let cleanUrl = validUrl;
+        let isPlaylist = false;
         try {
             const parsed = new URL(validUrl);
             if (parsed.hostname.includes('youtube.com')) {
                 const v = parsed.searchParams.get('v');
                 const list = parsed.searchParams.get('list');
-                if (list) cleanUrl = `https://www.youtube.com/playlist?list=${list}`;
+                if (list) { cleanUrl = `https://www.youtube.com/playlist?list=${list}`; isPlaylist = true; }
                 else if (v) cleanUrl = `https://www.youtube.com/watch?v=${v}`;
             } else if (parsed.hostname.includes('youtu.be')) {
                 cleanUrl = `https://www.youtube.com/watch?v=${parsed.pathname.slice(1)}`;
@@ -249,16 +280,24 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
             console.error("URL Parsing failed:", e);
         }
 
+        const downloadDir = getDownloadDir();
+        if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir, { recursive: true });
+
         // Step 1: Get video/playlist info
         console.log('[YouTube] Fetching info for:', cleanUrl);
         event.sender.send('youtube-download-progress', 'Fetching info from YouTube...');
         
-        const info = await youtubedl(cleanUrl, {
+        const infoFlags = {
             dumpJson: true,
             noCheckCertificates: true,
             noWarnings: true,
-            preferFreeFormats: true
-        });
+            preferFreeFormats: true,
+        };
+        if (isPlaylist) {
+            infoFlags.flatPlaylist = true;
+        }
+        
+        const info = await youtubedl(cleanUrl, infoFlags);
 
         const entries = info._type === 'playlist' && info.entries ? info.entries : [info];
         const results = [];
@@ -269,11 +308,13 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
             const entry = entries[i];
             if (!entry) continue;
             
-            const title = entry.title ? entry.title.replace(/[^\w\s\-()[\]]/g, '').trim() : `youtube_${Date.now()}`;
+            const title = entry.title ? entry.title.replace(/[^\w\s\-()\[\]]/g, '').trim() : `youtube_${Date.now()}`;
             const safeTitle = title.substring(0, 80);
             const stamp = Date.now();
-            const outTemplate = path.join(generationsDir, `yt_${stamp}_${safeTitle}.%(ext)s`);
-            const entryUrl = entry.webpage_url || entry.url || cleanUrl; // Fallback to cleanUrl for single video
+            const outPath = path.join(downloadDir, `${safeTitle}.%(ext)s`);
+            const entryUrl = entry.webpage_url || entry.url || entry.id
+                ? `https://www.youtube.com/watch?v=${entry.id}`
+                : cleanUrl;
 
             console.log(`[YouTube] Downloading (${i+1}/${entries.length}):`, safeTitle);
             if (entries.length > 1) {
@@ -282,22 +323,24 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
                 event.sender.send('youtube-download-progress', `Downloading: ${safeTitle}...`);
             }
 
-            // Step 2: Download best audio only
+            // Step 2: Download and extract audio as m4a
             try {
                 await youtubedl(entryUrl, {
-                    format: 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
-                    output: outTemplate,
+                    extractAudio: true,
+                    audioFormat: 'm4a',
+                    audioQuality: 0,
+                    output: outPath,
                     noPlaylist: true,
                     noCheckCertificates: true,
                     noWarnings: true,
                 });
 
                 // Step 3: Find the output file
-                const dirFiles = fs.readdirSync(generationsDir);
-                const outputFile = dirFiles.find(f => f.startsWith(`yt_${stamp}_`));
+                const dirFiles = fs.readdirSync(downloadDir);
+                const outputFile = dirFiles.find(f => f.startsWith(safeTitle) && !f.endsWith('.part'));
 
                 if (outputFile) {
-                    const filepath = path.join(generationsDir, outputFile);
+                    const filepath = path.join(downloadDir, outputFile);
                     console.log('[YouTube] Downloaded:', filepath);
                     results.push({ title: safeTitle, path: filepath, id: filepath });
                 }

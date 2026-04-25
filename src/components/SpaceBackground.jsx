@@ -125,10 +125,11 @@ export default function SpaceBackground() {
 
     // ── True 3D Starfield (parallax + forward flight) ──
     const fgStars = [];
-    for (let i = 0; i < 800; i++) {
+    for (let i = 0; i < 2000; i++) {
       fgStars.push({
-        x: (Math.random() - 0.5) * 6, y: (Math.random() - 0.5) * 4,
-        z: 0.1 + Math.random() * 1.5, size: 0.4 + Math.random() * 1.2,
+        x: (Math.random() - 0.5) * 8, y: (Math.random() - 0.5) * 6,
+        z: 0.05 + Math.random() * 1.8, size: 0.3 + Math.random() * 1.0,
+        twinkleSpeed: 0.2 + Math.random() * 0.5,  // Slow twinkle
         twinklePhase: Math.random() * Math.PI * 2,
         hue: 190 + Math.random() * 80,
       });
@@ -147,10 +148,10 @@ export default function SpaceBackground() {
       });
     }
 
-    // ── Dust lanes (subtle diagonal bands) ──
+    // ── Dust lanes (subtle wide gradient bands — no sharp lines) ──
     const dustLanes = [];
-    for (let i = 0; i < 3; i++) {
-      dustLanes.push({ x: Math.random() * 10, y: Math.random() * 10, angle: Math.random() * Math.PI, len: 0.8 + Math.random() * 0.6, opacity: 0.015 + Math.random() * 0.01 });
+    for (let i = 0; i < 2; i++) {
+      dustLanes.push({ x: Math.random() * 10, y: Math.random() * 10, angle: Math.random() * Math.PI, len: 0.8 + Math.random() * 0.6, opacity: 0.008 + Math.random() * 0.005 });
     }
 
     // ── Comets ──
@@ -428,16 +429,27 @@ export default function SpaceBackground() {
           ctx.beginPath(); ctx.arc(s.x + r * 0.3, s.y - r * 0.2, r * 0.6, 0, Math.PI * 2); ctx.fill();
         });
 
-        // ── Dust lanes ──
+        // ── Dust lanes (soft gradient bands, no sharp lines) ──
         dustLanes.forEach(d => {
           const s = toScreen(d.x, d.y, 0.3);
           if (!s.visible) return;
           const len = d.len * W * 0.3 * cam.zoom;
+          const ex = Math.cos(d.angle) * len;
+          const ey = Math.sin(d.angle) * len;
+          const perpX = -Math.sin(d.angle) * 40 * cam.zoom;
+          const perpY = Math.cos(d.angle) * 40 * cam.zoom;
+          const gr = ctx.createLinearGradient(s.x + perpX, s.y + perpY, s.x - perpX, s.y - perpY);
+          gr.addColorStop(0, 'transparent');
+          gr.addColorStop(0.3, `rgba(120,130,180,${d.opacity})`);
+          gr.addColorStop(0.7, `rgba(120,130,180,${d.opacity})`);
+          gr.addColorStop(1, 'transparent');
+          ctx.fillStyle = gr;
           ctx.beginPath();
-          ctx.moveTo(s.x - Math.cos(d.angle) * len, s.y - Math.sin(d.angle) * len);
-          ctx.lineTo(s.x + Math.cos(d.angle) * len, s.y + Math.sin(d.angle) * len);
-          ctx.strokeStyle = `rgba(120,130,180,${d.opacity})`;
-          ctx.lineWidth = 30 * cam.zoom; ctx.stroke();
+          ctx.moveTo(s.x - ex + perpX, s.y - ey + perpY);
+          ctx.lineTo(s.x + ex + perpX, s.y + ey + perpY);
+          ctx.lineTo(s.x + ex - perpX, s.y + ey - perpY);
+          ctx.lineTo(s.x - ex - perpX, s.y - ey - perpY);
+          ctx.closePath(); ctx.fill();
         });
 
         // ── Asteroid belts ──
@@ -454,7 +466,7 @@ export default function SpaceBackground() {
           });
         });
 
-        // ── True 3D Starfield ──
+        // ── True 3D Starfield (2000 round dots) ──
         fgStars.forEach(st => {
           // Move star forward based on speed to simulate 3D flight
           if (adventureActive) {
@@ -463,9 +475,9 @@ export default function SpaceBackground() {
           }
           // Reset to distant background if it flies past the camera
           if (st.z > 2.0) {
-             st.z = 0.1;
-             st.x = (Math.random() - 0.5) * 6;
-             st.y = (Math.random() - 0.5) * 4;
+             st.z = 0.05;
+             st.x = (Math.random() - 0.5) * 8;
+             st.y = (Math.random() - 0.5) * 6;
           }
 
           // Anchor stars directly around camera coordinates to ensure visibility
@@ -474,18 +486,20 @@ export default function SpaceBackground() {
           const s = toScreen(stWorldX, stWorldY, st.z);
           if (!s.visible) return;
           
-          const twinkle = 0.3 + 0.4 * Math.sin(time * 3 * st.z + st.twinklePhase);
-          const shimmer = high * 0.25;
-          const renderSize = (st.size + shimmer) * Math.max(0.2, Math.pow(st.z, 1.5)) * Math.max(1, cam.zoom * 0.8);
+          // Very gentle twinkling — slow and subtle
+          const twinkle = 0.55 + 0.15 * Math.sin(time * st.twinkleSpeed + st.twinklePhase);
+          const renderSize = st.size * Math.max(0.2, Math.pow(st.z, 1.5)) * Math.max(1, cam.zoom * 0.8);
           
-          ctx.fillStyle = `hsla(${st.hue}, 30%, 85%, ${twinkle + shimmer})`;
+          ctx.fillStyle = `hsla(${st.hue}, 25%, 85%, ${twinkle})`;
           
-          // Draw streak only during wormhole
+          // Draw streak only during wormhole, otherwise round dots
           if (wormholeActive) {
              const stretch = 40;
              ctx.fillRect(s.x, s.y, renderSize, renderSize + stretch * st.z);
           } else {
-             ctx.fillRect(s.x, s.y, renderSize, renderSize);
+             ctx.beginPath();
+             ctx.arc(s.x, s.y, Math.max(0.4, renderSize * 0.5), 0, Math.PI * 2);
+             ctx.fill();
           }
         });
         
@@ -653,8 +667,8 @@ export default function SpaceBackground() {
         return true;
       });
 
-      // ── Shooting stars ──
-      if (Math.random() < (adventureActive ? 0.025 : 0.008)) {
+      // ── Shooting stars (rare and elegant) ──
+      if (Math.random() < (adventureActive ? 0.004 : 0.002)) {
         shootingStars.push({
           x: Math.random() * W, y: Math.random() * H * 0.5,
           len: 40 + Math.random() * 60, spd: 5 + Math.random() * 5,
@@ -674,18 +688,17 @@ export default function SpaceBackground() {
         return true;
       });
 
-      // ── Meteor Showers ──
-      // Occasional burst of 10-20 shooting stars in the same direction
-      if (adventureActive && Math.random() < 0.0015) { // more frequent showers
+      // ── Meteor Showers (extremely rare — ~once every 3-5 minutes) ──
+      if (adventureActive && Math.random() < 0.00008) {
          const angle = Math.PI / 4 + (Math.random() - 0.5);
-         for(let i=0; i<15; i++) {
+         for(let i=0; i<8; i++) {
            setTimeout(() => {
              shootingStars.push({
                x: Math.random() * W, y: Math.random() * H * 0.5,
                len: 40 + Math.random() * 60, spd: 5 + Math.random() * 8,
                angle: angle, life: 1.2,
              });
-           }, Math.random() * 800);
+           }, Math.random() * 1200);
          }
       }
 
@@ -732,15 +745,15 @@ export default function SpaceBackground() {
          return true;
       });
 
-      // ── Warp streaks (adventure + bass) ──
-      if (adventureActive && bass > 0.4) {
-        const n = Math.floor((bass - 0.4) * 12);
+      // ── Warp streaks (adventure + heavy bass only) ──
+      if (adventureActive && bass > 0.65) {
+        const n = Math.floor((bass - 0.65) * 6);
         for (let i = 0; i < n; i++) {
           const sx = Math.random() * W, sy = Math.random() * H;
-          const len = 8 + bass * 20;
+          const len = 8 + bass * 15;
           ctx.beginPath(); ctx.moveTo(sx, sy);
           ctx.lineTo(sx + cam.vx * len * 3000, sy + cam.vy * len * 3000);
-          ctx.strokeStyle = `rgba(180,200,255,${0.08 + bass * 0.1})`; ctx.lineWidth = 0.5; ctx.stroke();
+          ctx.strokeStyle = `rgba(180,200,255,${0.04 + bass * 0.06})`; ctx.lineWidth = 0.5; ctx.stroke();
         }
       }
     };
