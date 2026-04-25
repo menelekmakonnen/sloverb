@@ -402,6 +402,30 @@ export default function StudioView() {
                 </div>
               </div>
             )}
+
+            {/* Clear Queue — stop everything */}
+            {(audioBuffer || store.queue.length > 0) && (
+              <button onClick={() => {
+                playbackEngine.stop();
+                store.setIsPlaying(false);
+                store.clearQueue();
+                store.setAudioBuffer(null);
+                store.setFileName('');
+                store.setTrack(null);
+                store.setAlbumArt(null);
+                store.setCurrentTime(0);
+                addToast('Queue cleared', 'info');
+              }} className="btn" style={{
+                padding: '8px 16px', borderRadius: 10, fontSize: 12, fontWeight: 600,
+                background: 'rgba(255,80,80,0.08)', color: 'rgba(255,120,120,0.9)',
+                border: '1px solid rgba(255,80,80,0.15)', transition: 'all 0.2s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,80,80,0.18)'; e.currentTarget.style.borderColor = 'rgba(255,80,80,0.35)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,80,80,0.08)'; e.currentTarget.style.borderColor = 'rgba(255,80,80,0.15)'; }}
+              >
+                Clear Queue
+              </button>
+            )}
           </div>
         )}
 
