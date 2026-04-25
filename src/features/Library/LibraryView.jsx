@@ -14,8 +14,11 @@ export default function LibraryView() {
   const { setActiveView } = useUIStore();
   const { addToast } = useUIStore();
   const sorted = getSortedSongs();
-  const [filteredSongs, setFilteredSongs] = useState(null);
-  const displaySongs = filteredSongs || sorted;
+  const [filteredIds, setFilteredIds] = useState(null);
+  // Apply filter on top of sorted — preserves sort order
+  const displaySongs = filteredIds
+    ? sorted.filter(s => filteredIds.has(s.id || s.path))
+    : sorted;
 
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState('');
@@ -110,7 +113,10 @@ export default function LibraryView() {
 
   return (
     <div style={{ height: '100%', overflow: 'auto', padding: '24px 28px', position: 'relative' }}>
-      <FilterDrawer songs={songs} onFilter={setFilteredSongs} onPlayAll={handlePlayAll} />
+      <FilterDrawer songs={songs} onFilter={(filtered) => {
+        if (!filtered || filtered.length === songs.length) { setFilteredIds(null); }
+        else { setFilteredIds(new Set(filtered.map(s => s.id || s.path))); }
+      }} onPlayAll={handlePlayAll} />
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ maxWidth: 800, margin: '0 auto' }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>

@@ -20,28 +20,39 @@ export default function FilterDrawer({ songs = [], onFilter, onPlayAll }) {
   const [selectedFormats, setSelectedFormats] = useState(new Set());
   const [expandedSections, setExpandedSections] = useState({ folder: false, artist: false, album: false, format: false });
 
-  // Derive filter options from songs
-  const folders = useMemo(() => {
-    const f = new Set();
+  // Derive filter options with counts from songs
+  const folderCounts = useMemo(() => {
+    const counts = {};
     songs.forEach(s => {
       if (s.path) {
         const parts = s.path.replace(/\\/g, '/').split('/');
-        parts.pop(); // remove filename
-        f.add(parts.join('/'));
+        parts.pop();
+        const folder = parts.join('/');
+        counts[folder] = (counts[folder] || 0) + 1;
       }
     });
-    return [...f].sort();
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   }, [songs]);
 
-  const artists = useMemo(() => [...new Set(songs.map(s => s.artist || 'Unknown'))].sort(), [songs]);
-  const albums = useMemo(() => [...new Set(songs.map(s => s.album || 'Unknown'))].sort(), [songs]);
-  const formats = useMemo(() => {
-    const f = new Set();
+  const artistCounts = useMemo(() => {
+    const counts = {};
+    songs.forEach(s => { const a = s.artist || 'Unknown'; counts[a] = (counts[a] || 0) + 1; });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }, [songs]);
+
+  const albumCounts = useMemo(() => {
+    const counts = {};
+    songs.forEach(s => { const a = s.album || 'Unknown'; counts[a] = (counts[a] || 0) + 1; });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }, [songs]);
+
+  const formatCounts = useMemo(() => {
+    const counts = {};
     songs.forEach(s => {
-      if (s.path) { const ext = s.path.split('.').pop()?.toLowerCase(); if (ext) f.add(ext); }
-      else if (s.name) { const ext = s.name.split('.').pop()?.toLowerCase(); if (ext) f.add(ext); }
+      const ext = (s.path || s.name || '').split('.').pop()?.toLowerCase();
+      if (ext) counts[ext] = (counts[ext] || 0) + 1;
     });
-    return [...f].sort();
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   }, [songs]);
 
   // Apply filters
@@ -223,15 +234,15 @@ export default function FilterDrawer({ songs = [], onFilter, onPlayAll }) {
               </div>
 
               {/* Format */}
-              {formats.length > 0 && (
+              {formatCounts.length > 0 && (
                 <div style={sectionStyle}>
                   <div onClick={() => toggleSection('format')} style={headerStyle}>
-                    {expandedSections.format ? <ChevronDown size={10} /> : <ChevronRight size={10} />} Format ({formats.length})
+                    {expandedSections.format ? <ChevronDown size={10} /> : <ChevronRight size={10} />} Format ({formatCounts.length})
                   </div>
                   {expandedSections.format && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                      {formats.map(f => (
-                        <span key={f} onClick={() => toggleSet(selectedFormats, setSelectedFormats, f)} style={chipStyle(selectedFormats.has(f))}>{f.toUpperCase()}</span>
+                      {formatCounts.map(([f, count]) => (
+                        <span key={f} onClick={() => toggleSet(selectedFormats, setSelectedFormats, f)} style={chipStyle(selectedFormats.has(f))}>{f.toUpperCase()} <span style={{ opacity: 0.5, fontSize: 9 }}>({count})</span></span>
                       ))}
                     </div>
                   )}
@@ -239,14 +250,14 @@ export default function FilterDrawer({ songs = [], onFilter, onPlayAll }) {
               )}
 
               {/* Folder */}
-              {folders.length > 0 && (
+              {folderCounts.length > 0 && (
                 <div style={sectionStyle}>
                   <div onClick={() => toggleSection('folder')} style={headerStyle}>
-                    {expandedSections.folder ? <ChevronDown size={10} /> : <ChevronRight size={10} />} Folder ({folders.length})
+                    {expandedSections.folder ? <ChevronDown size={10} /> : <ChevronRight size={10} />} Folder ({folderCounts.length})
                   </div>
                   {expandedSections.folder && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 180, overflow: 'auto' }}>
-                      {folders.map(f => {
+                      {folderCounts.map(([f, count]) => {
                         const shortName = f.split('/').filter(Boolean).slice(-2).join(' / ') || f;
                         return (
                           <div key={f} onClick={() => toggleSet(selectedFolders, setSelectedFolders, f)}
@@ -256,8 +267,12 @@ export default function FilterDrawer({ songs = [], onFilter, onPlayAll }) {
                               color: selectedFolders.has(f) ? 'var(--accent)' : 'var(--text)',
                               border: `1px solid ${selectedFolders.has(f) ? 'var(--accent)' : 'var(--glass-border)'}`,
                               transition: 'all 0.15s', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                             }}
-                            title={f}>{shortName}</div>
+                            title={f}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{shortName}</span>
+                            <span style={{ fontSize: 9, opacity: 0.5, flexShrink: 0, marginLeft: 6 }}>{count}</span>
+                          </div>
                         );
                       })}
                     </div>
@@ -266,15 +281,15 @@ export default function FilterDrawer({ songs = [], onFilter, onPlayAll }) {
               )}
 
               {/* Artist */}
-              {artists.length > 0 && (
+              {artistCounts.length > 0 && (
                 <div style={sectionStyle}>
                   <div onClick={() => toggleSection('artist')} style={headerStyle}>
-                    {expandedSections.artist ? <ChevronDown size={10} /> : <ChevronRight size={10} />} Artist ({artists.length})
+                    {expandedSections.artist ? <ChevronDown size={10} /> : <ChevronRight size={10} />} Artist ({artistCounts.length})
                   </div>
                   {expandedSections.artist && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 140, overflow: 'auto' }}>
-                      {artists.map(a => (
-                        <span key={a} onClick={() => toggleSet(selectedArtists, setSelectedArtists, a)} style={chipStyle(selectedArtists.has(a))}>{a}</span>
+                      {artistCounts.map(([a, count]) => (
+                        <span key={a} onClick={() => toggleSet(selectedArtists, setSelectedArtists, a)} style={chipStyle(selectedArtists.has(a))}>{a} <span style={{ opacity: 0.5, fontSize: 9 }}>({count})</span></span>
                       ))}
                     </div>
                   )}
@@ -282,15 +297,15 @@ export default function FilterDrawer({ songs = [], onFilter, onPlayAll }) {
               )}
 
               {/* Album */}
-              {albums.length > 0 && (
+              {albumCounts.length > 0 && (
                 <div style={sectionStyle}>
                   <div onClick={() => toggleSection('album')} style={headerStyle}>
-                    {expandedSections.album ? <ChevronDown size={10} /> : <ChevronRight size={10} />} Album ({albums.length})
+                    {expandedSections.album ? <ChevronDown size={10} /> : <ChevronRight size={10} />} Album ({albumCounts.length})
                   </div>
                   {expandedSections.album && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 140, overflow: 'auto' }}>
-                      {albums.map(a => (
-                        <span key={a} onClick={() => toggleSet(selectedAlbums, setSelectedAlbums, a)} style={chipStyle(selectedAlbums.has(a))}>{a}</span>
+                      {albumCounts.map(([a, count]) => (
+                        <span key={a} onClick={() => toggleSet(selectedAlbums, setSelectedAlbums, a)} style={chipStyle(selectedAlbums.has(a))}>{a} <span style={{ opacity: 0.5, fontSize: 9 }}>({count})</span></span>
                       ))}
                     </div>
                   )}
