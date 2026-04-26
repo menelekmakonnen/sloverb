@@ -38,12 +38,25 @@ function App() {
 
       window.electronAPI.onOpenFile(async (event, filePath) => {
         const filename = filePath.split('\\').pop().split('/').pop();
+        const ext = filename.split('.').pop().toLowerCase();
+        const isVideo = ext === 'mp4';
         const buf = await window.electronAPI.readFile(filePath);
-        const f = new File([buf], filename, { type: filename.endsWith('.mp4') ? 'video/mp4' : 'audio/wav' });
+        const f = new File([buf], filename, { type: isVideo ? 'video/mp4' : `audio/${ext === 'wav' ? 'wav' : 'mpeg'}` });
         f.path = filePath;
+        // Set UI to Studio
+        useUIStore.getState().setActiveView('studio');
+        // Set player metadata
+        const trackInfo = { name: filename, path: filePath, type: isVideo ? 'video' : 'raw', artist: 'Unknown Artist', album: 'Opened File' };
+        usePlayerStore.getState().setFileName(filename);
+        usePlayerStore.getState().setTrack(trackInfo);
+        // Load and play
         import('./lib/playbackEngine').then(({ playbackEngine }) => {
-           playbackEngine.loadFileAndPlay(f, { name: filename, path: filePath, type: 'library' });
+           playbackEngine.loadFileAndPlay(f, trackInfo);
         });
+        // Auto-add to library
+        try {
+          await window.electronAPI.addToLibrary({ id: filePath, name: filename, path: filePath, type: isVideo ? 'video' : 'raw', timestamp: Date.now() });
+        } catch {}
       });
 
       // Periodically update Discord RPC

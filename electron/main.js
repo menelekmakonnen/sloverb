@@ -472,6 +472,7 @@ function createWindow() {
 }
 
 app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
+app.setAppUserModelId('com.icunigroup.sloverb');
 
 let tray = null;
 let mainWindow = null;
@@ -486,6 +487,36 @@ app.on('open-file', (event, path) => {
         fileToOpen = path;
     }
 });
+
+const validAudioExts = ['.mp3', '.wav', '.flac', '.m4a', '.mp4', '.ogg', '.aac', '.wma'];
+
+function extractFileArg(argv) {
+    // Find the first argument that looks like a file path with a valid audio extension
+    for (const arg of argv.slice(1)) {
+        if (arg.startsWith('-') || arg.startsWith('--')) continue;
+        const ext = path.extname(arg).toLowerCase();
+        if (validAudioExts.includes(ext) && fs.existsSync(arg)) return arg;
+    }
+    return null;
+}
+
+// Single instance lock — if already running, forward file to existing window
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    app.quit();
+} else {
+    app.on('second-instance', (event, commandLine) => {
+        const filePath = extractFileArg(commandLine);
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+            if (filePath) {
+                mainWindow.webContents.send('open-file', filePath);
+            }
+        }
+    });
+}
 
 app.whenReady().then(() => {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -522,12 +553,10 @@ app.whenReady().then(() => {
         if (mainWindow) mainWindow.webContents.send('media-next');
     });
 
-    // Check Windows process args for files to open
-    if (process.platform === 'win32' && process.argv.length >= 2) {
-        const filePath = process.argv[1];
-        if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-            fileToOpen = filePath;
-        }
+    // Check process args for files to open (e.g. double-click association)
+    const startupFile = extractFileArg(process.argv);
+    if (startupFile) {
+        fileToOpen = startupFile;
     }
 
     mainWindow.webContents.on('did-finish-load', () => {

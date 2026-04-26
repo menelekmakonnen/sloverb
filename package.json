@@ -25,22 +25,34 @@
         },
         "nsis": {
             "oneClick": false,
-            "allowToChangeInstallationDirectory": true
+            "allowToChangeInstallationDirectory": true,
+            "perMachine": true,
+            "installerIcon": "public/icon.ico",
+            "uninstallerIcon": "public/icon.ico",
+            "installerHeaderIcon": "public/icon.ico"
         },
         "directories": {
             "output": "dist-electron"
         },
+        "files": [
+            "dist/**/*",
+            "electron/**/*",
+            "public/logo.png",
+            "public/icon.ico"
+        ],
         "fileAssociations": [
             {
-                "ext": [
-                    "mp3",
-                    "wav",
-                    "flac",
-                    "m4a",
-                    "mp4",
-                    "ogg"
-                ],
+                "ext": ["mp3", "wav", "flac", "m4a", "ogg", "aac", "wma"],
                 "name": "Audio File",
+                "description": "Open with Sloverb Studio",
+                "icon": "public/icon.ico",
+                "role": "Viewer"
+            },
+            {
+                "ext": ["mp4"],
+                "name": "Video File",
+                "description": "Open with Sloverb Studio",
+                "icon": "public/icon.ico",
                 "role": "Viewer"
             }
         ]
