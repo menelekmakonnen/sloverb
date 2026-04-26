@@ -32,7 +32,14 @@
         },
         "fileAssociations": [
             {
-                "ext": ["mp3", "wav", "flac", "m4a", "mp4", "ogg"],
+                "ext": [
+                    "mp3",
+                    "wav",
+                    "flac",
+                    "m4a",
+                    "mp4",
+                    "ogg"
+                ],
                 "name": "Audio File",
                 "role": "Viewer"
             }
@@ -62,6 +69,7 @@
         "cross-env": "^10.1.0",
         "electron": "^40.8.0",
         "electron-builder": "^26.8.1",
+        "png-to-ico": "^3.0.1",
         "vite": "^5.0.8",
         "wait-on": "^9.0.4"
     }

@@ -31,28 +31,73 @@ export default function SpaceBackground() {
     const resize = () => {
       const W = window.innerWidth, H = window.innerHeight;
       canvas.width = W; canvas.height = H;
+      // Rebuild static star layer
+      buildStaticStars(W, H);
     };
+
+    // ══════ STATIC STAR LAYER (rendered once to offscreen canvas) ══════
+    function buildStaticStars(W, H) {
+      if (!staticRef.current) staticRef.current = document.createElement('canvas');
+      const sc = staticRef.current;
+      sc.width = W; sc.height = H;
+      const sctx = sc.getContext('2d');
+      sctx.clearRect(0, 0, W, H);
+
+      // Uniform field stars spread across the entire canvas
+      for (let i = 0; i < 500; i++) {
+        const x = Math.random() * W;
+        const y = Math.random() * H;
+        // Stars near the galactic band (center 30%) are slightly brighter/larger
+        const bandCenter = H * 0.5;
+        const distFromBand = Math.abs(y - bandCenter) / (H * 0.5);
+        const bandBoost = Math.max(0, 1 - distFromBand * 1.5); // 0-1, strongest at center
+        const r = 0.15 + Math.random() * 0.6 + bandBoost * (Math.random() * 0.5);
+        const b = 0.08 + Math.random() * 0.18 + bandBoost * (Math.random() * 0.15);
+        const hue = 190 + Math.random() * 70;
+        sctx.beginPath(); sctx.arc(x, y, r, 0, Math.PI * 2);
+        sctx.fillStyle = `hsla(${hue}, 22%, 85%, ${b})`;
+        sctx.fill();
+      }
+
+      // Additional subtle cluster stars along the galactic band (gentler density boost)
+      for (let i = 0; i < 180; i++) {
+        const x = Math.random() * W;
+        // Gaussian-ish distribution centered on band
+        const y = H * 0.5 + (Math.random() + Math.random() + Math.random() - 1.5) * H * 0.3;
+        const r = Math.random() * 0.45 + 0.15;
+        const b = Math.random() * 0.15 + 0.08;
+        const hue = 200 + Math.random() * 60;
+        sctx.beginPath(); sctx.arc(x, y, r, 0, Math.PI * 2);
+        sctx.fillStyle = `hsla(${hue}, 18%, 80%, ${b})`;
+        sctx.fill();
+      }
+
+      // Sparse bright feature stars (visible anchor points everywhere)
+      for (let i = 0; i < 40; i++) {
+        const x = Math.random() * W;
+        const y = Math.random() * H;
+        const r = 0.8 + Math.random() * 0.8;
+        const hue = 180 + Math.random() * 80;
+        sctx.beginPath(); sctx.arc(x, y, r, 0, Math.PI * 2);
+        sctx.fillStyle = `hsla(${hue}, 25%, 90%, ${0.25 + Math.random() * 0.2})`;
+        sctx.fill();
+      }
+    }
 
     resize();
     window.addEventListener('resize', resize);
 
     // ══════ WORLD SPACE — everything in world coords, camera moves ══════
     // World is large: 0-30 normalized. Camera viewport is ~1.0 wide.
-    const cam = { x: 15, y: 15, vx: 0, vy: 0, zoom: 1, targetZoom: 1, noiseT: Math.random() * 1000 };
+    const cam = { x: 15, y: 15, vx: 0, vy: 0, vz: 0, zoom: 1, targetZoom: 1, noiseT: Math.random() * 1000, forwardPhase: 0, forwardDir: 0 };
     let supernovas = [];
     let wormholeActive = false;
     let wormholePhase = 0;
 
-    let orbitingSys = null;
-    let orbitPhase = 0;
-    let orbitTargetPhase = 0;
-    let orbitCooldownSys = null;
-    let orbitCooldownTimer = 0;
-
     // ── Distant galaxies (fewer, spread across vast 30x30 world) ──
     const galaxies = [];
     const solarSystems = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       const type = Math.random() > 0.65 ? 'elliptical' : (Math.random() > 0.85 ? 'irregular' : 'spiral');
       const gx = 2 + Math.random() * 26;
       const gy = 2 + Math.random() * 26;
@@ -84,10 +129,10 @@ export default function SpaceBackground() {
             dist, phase: Math.random() * Math.PI * 2,
             speed: 0.015 + Math.random() * 0.025,
             size: 5 + Math.random() * 14,
-            hue: Math.random() * 360,
-            hasRing: Math.random() > 0.7, // Rings are slightly rarer
-            hasAtmosphere: Math.random() > 0.3,
-            bands: Math.random() > 0.6 ? 2 + Math.floor(Math.random() * 4) : 0,
+            hue: [260, 30, 350, 210, 180, 90, 280, 45][p % 8],
+            hasRing: Math.random() > 0.55,
+            hasAtmosphere: Math.random() > 0.4,
+            bands: Math.random() > 0.5 ? 2 + Math.floor(Math.random() * 3) : 0,
             moons,
           });
         }
@@ -123,15 +168,14 @@ export default function SpaceBackground() {
       asteroidBelts.push({ cx: bx, cy: by, rocks: belt });
     }
 
-    // ── True 3D Starfield (parallax + forward flight) ──
+    // ── Foreground stars (twinkle, parallax) ──
     const fgStars = [];
-    for (let i = 0; i < 1200; i++) {
+    for (let i = 0; i < 150; i++) {
       fgStars.push({
-        x: (Math.random() - 0.5) * 8, y: (Math.random() - 0.5) * 6,
-        z: 0.05 + Math.random() * 1.8, size: 0.3 + Math.random() * 1.0,
-        twinkleSpeed: 0.2 + Math.random() * 0.5,
+        x: Math.random() * 30, y: Math.random() * 30,
+        z: 0.3 + Math.random() * 0.7, size: 0.5 + Math.random() * 1.2,
         twinklePhase: Math.random() * Math.PI * 2,
-        brightness: 0.4 + Math.random() * 0.5,
+        hue: 190 + Math.random() * 80,
       });
     }
 
@@ -148,10 +192,10 @@ export default function SpaceBackground() {
       });
     }
 
-    // ── Dust lanes (subtle wide gradient bands — no sharp lines) ──
+    // ── Dust lanes (subtle diagonal bands) ──
     const dustLanes = [];
-    for (let i = 0; i < 2; i++) {
-      dustLanes.push({ x: Math.random() * 10, y: Math.random() * 10, angle: Math.random() * Math.PI, len: 0.8 + Math.random() * 0.6, opacity: 0.008 + Math.random() * 0.005 });
+    for (let i = 0; i < 3; i++) {
+      dustLanes.push({ x: Math.random() * 10, y: Math.random() * 10, angle: Math.random() * Math.PI, len: 0.8 + Math.random() * 0.6, opacity: 0.015 + Math.random() * 0.01 });
     }
 
     // ── Comets ──
@@ -175,6 +219,13 @@ export default function SpaceBackground() {
       const W = canvas.width, H = canvas.height;
       if (W === 0 || H === 0) return;
 
+      // Light mode: skip all rendering to free resources
+      const currentMode = useUIStore.getState().mode;
+      if (currentMode !== 'dark') {
+        ctx.clearRect(0, 0, W, H);
+        return;
+      }
+
       // Read state once (cheap)
       const analyser = usePlayerStore.getState().analyserRef?.current;
       const isPlaying = usePlayerStore.getState().isPlaying;
@@ -195,20 +246,32 @@ export default function SpaceBackground() {
       // ── Camera movement ──
       if (adventureActive) {
         if (!wormholeActive) {
-          cam.noiseT += 0.003 + energy * 0.01;
+          cam.noiseT += 0.003 + energy * 0.008;
           // Smooth noise-based direction (non-predictable, non-circular)
           const nx = smoothRandom(cam.noiseT, 1) - 0.5;
           const ny = smoothRandom(cam.noiseT * 0.7, 2) - 0.5;
-          const speed = 0.005 + energy * 0.018 + bass * 0.012;
-          cam.vx += (nx * speed - cam.vx) * 0.02;
-          cam.vy += (ny * speed - cam.vy) * 0.02;
-          // Subtle zoom pulse on beat
-          cam.zoom += (1.0 + bass * 0.15 - cam.zoom) * 0.03;
+          const speed = 0.004 + energy * 0.012 + bass * 0.008;
+          cam.vx += (nx * speed - cam.vx) * 0.015;
+          cam.vy += (ny * speed - cam.vy) * 0.015;
+
+          // ── Forward / backward z-axis flight (occasional) ──
+          if (cam.forwardPhase <= 0 && Math.random() < 0.001) {
+            cam.forwardPhase = 1.0; // start a forward/backward burst
+            cam.forwardDir = Math.random() > 0.4 ? 1 : -1; // 60% forward, 40% backward
+          }
+          if (cam.forwardPhase > 0) {
+            cam.forwardPhase -= 0.005;
+            const ramp = Math.sin(cam.forwardPhase * Math.PI); // smooth ease in/out
+            cam.vz = cam.forwardDir * ramp * (0.015 + energy * 0.01);
+          } else {
+            cam.vz *= 0.95; // decay
+          }
         }
       } else {
         // Idle: gentle sinusoidal float
         cam.vx += (Math.sin(time * 0.04) * 0.0003 - cam.vx) * 0.02;
         cam.vy += (Math.cos(time * 0.03) * 0.0002 - cam.vy) * 0.02;
+        cam.vz *= 0.95;
       }
 
       // ── Wormhole Logic ──
@@ -242,10 +305,6 @@ export default function SpaceBackground() {
       // Find closest solar system for zoom and gravitational pull
       let closestSystemDist = Infinity;
       let closestSys = null;
-      
-      if (orbitCooldownTimer > 0) orbitCooldownTimer -= 0.016;
-      if (orbitCooldownTimer <= 0) orbitCooldownSys = null;
-
       solarSystems.forEach(sys => {
         let dx = sys.cx - cam.x, dy = sys.cy - cam.y;
         if (dx > 15) dx -= 30; if (dx < -15) dx += 30;
@@ -255,44 +314,63 @@ export default function SpaceBackground() {
            closestSystemDist = dist;
            closestSys = sys;
         }
-        
-        // Gravitational pull toward galaxies when close enough, but not if we just exited it
-        if (adventureActive && !wormholeActive && !orbitingSys && dist < 1.5 && dist > 0.05 && sys !== orbitCooldownSys) {
-           cam.vx += (dx / dist) * 0.0008 * (1.5 - dist);
-           cam.vy += (dy / dist) * 0.0008 * (1.5 - dist);
-           
-           // Enter orbit!
-           if (dist < 0.6) {
-               orbitingSys = sys;
-               orbitPhase = Math.atan2(-dy, -dx); // Start angle where camera entered
-               orbitTargetPhase = orbitPhase + Math.PI * 2 * (1 + Math.random() * 2); // Orbit 1 to 3 times
-           }
-        }
       });
 
-      // ── Orbit Logic ──
-      if (orbitingSys) {
-          orbitPhase += 0.005 + energy * 0.01; // Orbit speed
-          const r = 0.4; // Orbit radius
-          cam.x = orbitingSys.cx + Math.cos(orbitPhase) * r;
-          cam.y = orbitingSys.cy + Math.sin(orbitPhase) * r;
-          closestSystemDist = r; // Force zoom
+      // ── Solar system visit lifecycle ──
+      // Track how long we've been inside a system
+      if (!cam.visitingSys) cam.visitingSys = null;
+      if (!cam.visitTimer) cam.visitTimer = 0;
+      if (!cam.exitingSystem) cam.exitingSystem = false;
 
-          // Exit orbit
-          if (orbitPhase >= orbitTargetPhase) {
-              const exitAngle = orbitPhase + Math.PI / 2; // Tangential exit
-              const exitSpeed = 0.04 + energy * 0.02; // Slingshot speed
-              cam.vx = Math.cos(exitAngle) * exitSpeed;
-              cam.vy = Math.sin(exitAngle) * exitSpeed;
-              orbitCooldownSys = orbitingSys;
-              orbitCooldownTimer = 10.0; // 10 seconds cooldown
-              orbitingSys = null;
+      if (adventureActive && !wormholeActive) {
+        if (closestSystemDist < 0.7 && closestSys) {
+          // Entering or dwelling inside a system
+          if (cam.visitingSys !== closestSys) {
+            // New system encounter
+            cam.visitingSys = closestSys;
+            cam.visitTimer = 0;
+            cam.exitingSystem = false;
           }
+          cam.visitTimer += 0.016; // ~1 per second at 60fps
+
+          if (cam.visitTimer < 8) {
+            // Phase 1: Gravitational pull inward (exploring the system)
+            let dx = closestSys.cx - cam.x, dy = closestSys.cy - cam.y;
+            if (dx > 15) dx -= 30; if (dx < -15) dx += 30;
+            if (dy > 15) dy -= 30; if (dy < -15) dy += 30;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 0.05) {
+              cam.vx += (dx / dist) * 0.0006 * (1.5 - Math.min(dist, 1.5));
+              cam.vy += (dy / dist) * 0.0006 * (1.5 - Math.min(dist, 1.5));
+            }
+          } else {
+            // Phase 2: Gently push camera away to resume exploration
+            cam.exitingSystem = true;
+            let dx = closestSys.cx - cam.x, dy = closestSys.cy - cam.y;
+            if (dx > 15) dx -= 30; if (dx < -15) dx += 30;
+            if (dy > 15) dy -= 30; if (dy < -15) dy += 30;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 0.02) {
+              // Repel — push away from center
+              const repelStrength = 0.002 * Math.min(1, cam.visitTimer - 8);
+              cam.vx -= (dx / dist) * repelStrength;
+              cam.vy -= (dy / dist) * repelStrength;
+            }
+          }
+        } else {
+          // We've left the system
+          if (cam.exitingSystem) {
+            cam.visitingSys = null;
+            cam.visitTimer = 0;
+            cam.exitingSystem = false;
+          }
+        }
       }
 
-      // Target zoom: if dist < 0.7, zoom = 3.8, else 1
-      cam.targetZoom = closestSystemDist < 0.7 ? 3.8 : 1;
-      cam.zoom += (cam.targetZoom - cam.zoom) * 0.05;
+      // Target zoom: smooth transition based on distance
+      const zoomInRange = closestSystemDist < 0.7 && !cam.exitingSystem;
+      cam.targetZoom = zoomInRange ? 3.8 : 1;
+      cam.zoom += (cam.targetZoom - cam.zoom) * 0.04;
 
       // Deep space opacity: fade out when zoomed in (inside solar system)
       const deepSpaceOpacity = Math.max(0, 1 - (cam.zoom - 1) * 0.4);
@@ -316,19 +394,98 @@ export default function SpaceBackground() {
       // Static star background — with subtle parallax drift
       ctx.fillStyle = 'rgb(6,6,18)'; ctx.fillRect(0, 0, W, H);
 
+      // ── Forward/backward z-flight: radial star streaks from/to center ──
+      if (Math.abs(cam.vz) > 0.002) {
+        const cx = W / 2, cy = H / 2;
+        const intensity = Math.abs(cam.vz) * 40;
+        const isForward = cam.vz > 0;
+        const streakCount = Math.floor(intensity * 4 + 6);
+        for (let i = 0; i < streakCount; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const baseDist = 30 + Math.random() * Math.max(W, H) * 0.5;
+          const sx = cx + Math.cos(angle) * baseDist;
+          const sy = cy + Math.sin(angle) * baseDist;
+          const streakLen = intensity * (8 + Math.random() * 12);
+          let ex, ey;
+          if (isForward) {
+            // Stars fly outward from center
+            ex = sx + Math.cos(angle) * streakLen;
+            ey = sy + Math.sin(angle) * streakLen;
+          } else {
+            // Stars converge inward toward center
+            ex = sx - Math.cos(angle) * streakLen;
+            ey = sy - Math.sin(angle) * streakLen;
+          }
+          const alpha = Math.min(0.5, intensity * 0.15) * (0.3 + Math.random() * 0.7);
+          const g = ctx.createLinearGradient(sx, sy, ex, ey);
+          g.addColorStop(0, `rgba(200,210,255,${alpha})`);
+          g.addColorStop(1, 'transparent');
+          ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey);
+          ctx.strokeStyle = g; ctx.lineWidth = 0.5 + Math.random() * 0.8; ctx.stroke();
+        }
+      }
+
       if (deepSpaceOpacity > 0) {
         ctx.save();
         ctx.globalAlpha = deepSpaceOpacity;
 
-        // Dynamic Milky Way Band (drawn in screen space to prevent seams)
+        // Dynamic Milky Way Band — brightness pulses with audio
+        const bandBrightness = 0.025 + (isPlaying ? bass * 0.03 + energy * 0.015 : 0);
         const mwGrad = ctx.createLinearGradient(0, H * 0.3, W, H * 0.7);
         mwGrad.addColorStop(0, 'transparent');
-        mwGrad.addColorStop(0.3, 'rgba(120,110,150,0.03)');
-        mwGrad.addColorStop(0.5, 'rgba(140,130,180,0.05)');
-        mwGrad.addColorStop(0.7, 'rgba(120,110,150,0.03)');
+        mwGrad.addColorStop(0.3, `rgba(120,110,150,${bandBrightness})`);
+        mwGrad.addColorStop(0.5, `rgba(140,130,180,${bandBrightness * 1.6})`);
+        mwGrad.addColorStop(0.7, `rgba(120,110,150,${bandBrightness})`);
         mwGrad.addColorStop(1, 'transparent');
         ctx.fillStyle = mwGrad;
         ctx.fillRect(0, 0, W, H);
+
+        if (staticRef.current) {
+          const driftMul = adventureActive ? 0.35 : 0.08;
+          const shiftX = (cam.x * W * driftMul) % W;
+          const shiftY = (cam.y * H * driftMul) % H;
+          const px = Math.floor(shiftX >= 0 ? -shiftX : -shiftX - W);
+          const py = Math.floor(shiftY >= 0 ? -shiftY : -shiftY - H);
+          // Audio-reactive brightness for the star layer
+          const starAlpha = isPlaying ? Math.min(1, 0.7 + energy * 0.3 + bass * 0.15) : 0.85;
+          ctx.globalAlpha = deepSpaceOpacity * starAlpha;
+          ctx.drawImage(staticRef.current, px, py);
+          ctx.drawImage(staticRef.current, px + W, py);
+          ctx.drawImage(staticRef.current, px, py + H);
+          ctx.drawImage(staticRef.current, px + W, py + H);
+          ctx.globalAlpha = deepSpaceOpacity;
+        }
+
+        // ── Twinkling transit stars (only during zoom transitions) ──
+        const zoomDelta = Math.abs(cam.zoom - cam.targetZoom);
+        const isTransiting = zoomDelta > 0.15;
+        const isApproaching = cam.targetZoom > cam.zoom;
+        if (isTransiting) {
+          const twinkleCount = Math.floor(zoomDelta * 20 + 3);
+          for (let i = 0; i < twinkleCount; i++) {
+            const tx = Math.random() * W;
+            const ty = Math.random() * H;
+            const twinkR = 0.4 + Math.random() * 1.0;
+            const twinkAlpha = (0.2 + zoomDelta * 0.4) * Math.random();
+            const twinkHue = isApproaching ? 200 + Math.random() * 40 : 340 + Math.random() * 40;
+            ctx.beginPath(); ctx.arc(tx, ty, twinkR, 0, Math.PI * 2);
+            ctx.fillStyle = `hsla(${twinkHue}, 60%, 80%, ${twinkAlpha})`;
+            ctx.fill();
+          }
+        }
+
+        // ── Audio-reactive star sparkle (beat-synced, subtle) ──
+        if (isPlaying && bass > 0.6) {
+          const sparkCount = Math.floor((bass - 0.6) * 5);
+          for (let i = 0; i < sparkCount; i++) {
+            const sx = Math.random() * W;
+            const sy = H * 0.25 + Math.random() * H * 0.5;
+            const sr = 0.8 + Math.random() * 1.2;
+            ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+            ctx.fillStyle = `hsla(${220 + Math.random() * 60}, 50%, 80%, ${0.15 + bass * 0.15})`;
+            ctx.fill();
+          }
+        }
         
         ctx.restore();
       }
@@ -342,44 +499,65 @@ export default function SpaceBackground() {
           const s = toScreen(g.x, g.y, 0.3);
           if (!s.visible) return;
           const sz = g.size * W * 0.35 * cam.zoom;
-          if (sz < 3) return; // Too small to see — skip entirely
           const tilt = g.tilt || 0.5;
           
           if (g.type === 'spiral') {
+            // Spiral arms with dense star clusters
             for (let arm = 0; arm < g.arms; arm++) {
               const armAngle = g.angle + (arm * Math.PI * 2) / g.arms;
-              ctx.fillStyle = `hsla(${g.hue}, 50%, 65%, 0.1)`;
-              for (let p = 0; p < 25; p++) {
-                const t = p / 25;
+              for (let p = 0; p < 40; p++) {
+                const t = p / 40;
                 const spiral = armAngle + t * 3.5;
                 const r = t * sz;
                 const px = s.x + Math.cos(spiral) * r;
                 const py = s.y + Math.sin(spiral) * r * tilt;
-                const dotR = (0.4 + t * 1.0) * Math.max(1, cam.zoom * 0.5);
-                ctx.beginPath(); ctx.arc(px, py, dotR, 0, Math.PI * 2); ctx.fill();
+                const dotR = (0.4 + t * 1.2 + (1 - t) * 0.6) * Math.max(1, cam.zoom * 0.5);
+                ctx.beginPath(); ctx.arc(px, py, dotR, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${g.hue + t * 50}, 55%, 65%, ${0.12 * (1 - t * 0.4)})`;
+                ctx.fill();
+                // Scatter dust between arms
+                if (p % 3 === 0) {
+                  const jx = px + (Math.random() - 0.5) * sz * 0.15;
+                  const jy = py + (Math.random() - 0.5) * sz * 0.1;
+                  ctx.beginPath(); ctx.arc(jx, jy, (0.3 + Math.random() * 0.4) * Math.max(1, cam.zoom * 0.5), 0, Math.PI * 2);
+                  ctx.fillStyle = `hsla(${g.hue + 20}, 40%, 55%, 0.04)`;
+                  ctx.fill();
+                }
               }
             }
           } else if (g.type === 'elliptical') {
-             // Pre-seeded positions (no per-frame random)
-             if (!g._pts) { g._pts = []; for (let p = 0; p < 60; p++) g._pts.push({ a: Math.random() * Math.PI * 2, r: Math.pow(Math.random(), 2) * 0.6, s: 0.5 + Math.random() }); }
-             ctx.fillStyle = `hsla(${g.hue}, 40%, 75%, 0.06)`;
-             g._pts.forEach(pt => {
-                ctx.beginPath(); ctx.arc(s.x + Math.cos(pt.a + g.angle) * pt.r * sz, s.y + Math.sin(pt.a + g.angle) * pt.r * sz * tilt, pt.s * Math.max(1, cam.zoom * 0.5), 0, Math.PI * 2); ctx.fill();
-             });
+             // Elliptical blob
+             for (let p = 0; p < 150; p++) {
+                const a = Math.random() * Math.PI * 2;
+                const r = Math.pow(Math.random(), 2) * sz * 0.6;
+                const px = s.x + Math.cos(a + g.angle) * r;
+                const py = s.y + Math.sin(a + g.angle) * r * tilt;
+                ctx.beginPath(); ctx.arc(px, py, (0.5 + Math.random()) * Math.max(1, cam.zoom * 0.5), 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${g.hue + Math.random()*20}, 40%, 75%, ${0.05 + Math.random() * 0.05})`;
+                ctx.fill();
+             }
           } else {
-             if (!g._pts) { g._pts = []; for (let p = 0; p < 40; p++) g._pts.push({ ox: (Math.random() - 0.5) * 0.8, oy: (Math.random() - 0.5) * 0.8, s: 1 + Math.random() * 2 }); }
-             ctx.fillStyle = `hsla(${g.hue}, 50%, 65%, 0.04)`;
-             g._pts.forEach(pt => {
-                ctx.beginPath(); ctx.arc(s.x + pt.ox * sz, s.y + pt.oy * sz * tilt, pt.s * Math.max(1, cam.zoom * 0.5), 0, Math.PI * 2); ctx.fill();
-             });
+             // Irregular
+             for (let p = 0; p < 80; p++) {
+                const ox = (Math.random() - 0.5) * sz * 0.8;
+                const oy = (Math.random() - 0.5) * sz * 0.8 * tilt;
+                ctx.beginPath(); ctx.arc(s.x + ox, s.y + oy, (1 + Math.random() * 2) * Math.max(1, cam.zoom * 0.5), 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${g.hue + ox}, 50%, 65%, ${0.03 + Math.random() * 0.04})`;
+                ctx.fill();
+             }
           }
 
-          // Core glow only (skip outer halo for perf)
+          // Core glow (bright center)
           const cg = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, sz * 0.2);
           cg.addColorStop(0, `hsla(${g.hue + 10}, 50%, 85%, 0.2)`);
-          cg.addColorStop(0.5, `hsla(${g.hue}, 40%, 65%, 0.06)`);
+          cg.addColorStop(0.4, `hsla(${g.hue}, 40%, 65%, 0.08)`);
           cg.addColorStop(1, 'transparent');
           ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(s.x, s.y, sz * 0.2, 0, Math.PI * 2); ctx.fill();
+          // Outer halo
+          const oh = ctx.createRadialGradient(s.x, s.y, sz * 0.15, s.x, s.y, sz * 0.5);
+          oh.addColorStop(0, `hsla(${g.hue}, 30%, 50%, 0.03)`);
+          oh.addColorStop(1, 'transparent');
+          ctx.fillStyle = oh; ctx.beginPath(); ctx.arc(s.x, s.y, sz * 0.5, 0, Math.PI * 2); ctx.fill();
         });
         ctx.restore();
       }
@@ -410,27 +588,17 @@ export default function SpaceBackground() {
           ctx.beginPath(); ctx.arc(s.x + r * 0.3, s.y - r * 0.2, r * 0.6, 0, Math.PI * 2); ctx.fill();
         });
 
-        // ── Dust lanes (soft gradient bands, no sharp lines) ──
+        // ── Dust lanes (soft nebulous clouds, NOT lines) ──
         dustLanes.forEach(d => {
           const s = toScreen(d.x, d.y, 0.3);
           if (!s.visible) return;
-          const len = d.len * W * 0.3 * cam.zoom;
-          const ex = Math.cos(d.angle) * len;
-          const ey = Math.sin(d.angle) * len;
-          const perpX = -Math.sin(d.angle) * 40 * cam.zoom;
-          const perpY = Math.cos(d.angle) * 40 * cam.zoom;
-          const gr = ctx.createLinearGradient(s.x + perpX, s.y + perpY, s.x - perpX, s.y - perpY);
-          gr.addColorStop(0, 'transparent');
-          gr.addColorStop(0.3, `rgba(120,130,180,${d.opacity})`);
-          gr.addColorStop(0.7, `rgba(120,130,180,${d.opacity})`);
-          gr.addColorStop(1, 'transparent');
-          ctx.fillStyle = gr;
-          ctx.beginPath();
-          ctx.moveTo(s.x - ex + perpX, s.y - ey + perpY);
-          ctx.lineTo(s.x + ex + perpX, s.y + ey + perpY);
-          ctx.lineTo(s.x + ex - perpX, s.y + ey - perpY);
-          ctx.lineTo(s.x - ex - perpX, s.y - ey - perpY);
-          ctx.closePath(); ctx.fill();
+          const r = d.len * W * 0.15 * cam.zoom;
+          const dg = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
+          dg.addColorStop(0, `rgba(100,110,150,${d.opacity * 0.8})`);
+          dg.addColorStop(0.5, `rgba(80,90,130,${d.opacity * 0.3})`);
+          dg.addColorStop(1, 'transparent');
+          ctx.fillStyle = dg;
+          ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.fill();
         });
 
         // ── Asteroid belts ──
@@ -447,44 +615,15 @@ export default function SpaceBackground() {
           });
         });
 
-        // ── True 3D Starfield (1200 efficient dots) ──
+        // ── Foreground parallax stars ──
         fgStars.forEach(st => {
-          if (adventureActive) {
-             const flightSpeed = 0.001 + energy * 0.003;
-             st.z += flightSpeed * (wormholeActive ? 5 : 1);
-          }
-          if (st.z > 2.0) {
-             st.z = 0.05;
-             st.x = (Math.random() - 0.5) * 8;
-             st.y = (Math.random() - 0.5) * 6;
-          }
-
-          const stWorldX = cam.x + st.x;
-          const stWorldY = cam.y + st.y;
-          const s = toScreen(stWorldX, stWorldY, st.z);
+          const s = toScreen(st.x, st.y, st.z);
           if (!s.visible) return;
-          
-          const twinkle = st.brightness + 0.12 * Math.sin(time * st.twinkleSpeed + st.twinklePhase);
-          const shimmer = energy * 0.1;
-          const renderSize = (st.size + shimmer) * Math.max(0.2, Math.pow(st.z, 1.5)) * Math.max(1, cam.zoom * 0.8);
-          const alpha = Math.min(1, twinkle + shimmer * 0.3);
-          const lum = Math.floor(200 + energy * 40);
-          
-          if (wormholeActive) {
-             ctx.fillStyle = `rgba(${lum},${lum},255,${alpha})`;
-             ctx.fillRect(s.x, s.y, renderSize, renderSize + 40 * st.z);
-          } else {
-             // Use fillRect for tiny stars (much faster than arc)
-             const sz = Math.max(0.6, renderSize);
-             ctx.fillStyle = `rgba(${lum},${lum},255,${alpha})`;
-             if (sz < 1.5) {
-               ctx.fillRect(s.x, s.y, sz, sz);
-             } else {
-               ctx.beginPath();
-               ctx.arc(s.x, s.y, sz * 0.5, 0, Math.PI * 2);
-               ctx.fill();
-             }
-          }
+          const twinkle = 0.35 + 0.15 * Math.sin(time * 0.8 * st.z + st.twinklePhase);
+          const shimmer = high * 0.08;
+          ctx.beginPath(); ctx.arc(s.x, s.y, (st.size + shimmer) * st.z * Math.max(1, cam.zoom * 0.8), 0, Math.PI * 2);
+          ctx.fillStyle = `hsla(${st.hue}, 30%, 85%, ${twinkle + shimmer})`;
+          ctx.fill();
         });
         
         ctx.restore();
@@ -651,38 +790,43 @@ export default function SpaceBackground() {
         return true;
       });
 
-      // ── Shooting stars (rare and elegant) ──
-      if (Math.random() < (adventureActive ? 0.004 : 0.002)) {
+      // ── Shooting stars (rare, brief flashes) ──
+      if (Math.random() < (adventureActive ? 0.006 : 0.003)) {
+        const angle = Math.PI / 6 + Math.random() * (Math.PI * 2 / 3); // mostly downward
         shootingStars.push({
-          x: Math.random() * W, y: Math.random() * H * 0.5,
-          len: 40 + Math.random() * 60, spd: 5 + Math.random() * 5,
-          angle: Math.PI / 4 + Math.random() * 0.4, life: 1,
+          x: Math.random() * W, y: Math.random() * H * 0.4,
+          len: 15 + Math.random() * 30, spd: 8 + Math.random() * 10,
+          angle, life: 1,
         });
       }
       shootingStars = shootingStars.filter(s => {
-        s.x += Math.cos(s.angle) * s.spd; s.y += Math.sin(s.angle) * s.spd; s.life -= 0.02;
-        if (s.life <= 0) return false;
+        s.x += Math.cos(s.angle) * s.spd; s.y += Math.sin(s.angle) * s.spd; s.life -= 0.04;
+        if (s.life <= 0 || s.x < -50 || s.x > W + 50 || s.y < -50 || s.y > H + 50) return false;
         ctx.beginPath(); ctx.moveTo(s.x, s.y);
         const tx = s.x - Math.cos(s.angle) * s.len * s.life;
         const ty = s.y - Math.sin(s.angle) * s.len * s.life;
         ctx.lineTo(tx, ty);
         const g = ctx.createLinearGradient(s.x, s.y, tx, ty);
-        g.addColorStop(0, `rgba(255,255,255,${s.life * 0.8})`); g.addColorStop(1, 'transparent');
-        ctx.strokeStyle = g; ctx.lineWidth = 1; ctx.stroke();
+        g.addColorStop(0, `rgba(255,255,255,${s.life * 0.7})`); g.addColorStop(1, 'transparent');
+        ctx.strokeStyle = g; ctx.lineWidth = 0.8; ctx.stroke();
         return true;
       });
 
-      // ── Meteor Showers (extremely rare — ~once every 3-5 minutes) ──
-      if (adventureActive && Math.random() < 0.00008) {
-         const angle = Math.PI / 4 + (Math.random() - 0.5);
-         for(let i=0; i<8; i++) {
+      // ── Meteor Showers ──
+      // Rare burst of a few shooting stars falling downward
+      if (adventureActive && Math.random() < 0.0008) {
+         const baseAngle = Math.PI / 4 + Math.random() * (Math.PI / 2);
+         const radiantX = Math.random() * W;
+         const radiantY = Math.random() * H * 0.2;
+         for(let i=0; i<6; i++) {
            setTimeout(() => {
              shootingStars.push({
-               x: Math.random() * W, y: Math.random() * H * 0.5,
-               len: 40 + Math.random() * 60, spd: 5 + Math.random() * 8,
-               angle: angle, life: 1.2,
+               x: radiantX + (Math.random() - 0.5) * 60,
+               y: radiantY + (Math.random() - 0.5) * 30,
+               len: 15 + Math.random() * 25, spd: 8 + Math.random() * 10,
+               angle: baseAngle + (Math.random() - 0.5) * 0.3, life: 1,
              });
-           }, Math.random() * 1200);
+           }, Math.random() * 600);
          }
       }
 
@@ -729,15 +873,20 @@ export default function SpaceBackground() {
          return true;
       });
 
-      // ── Warp streaks (adventure + heavy bass only) ──
-      if (adventureActive && bass > 0.65) {
-        const n = Math.floor((bass - 0.65) * 6);
-        for (let i = 0; i < n; i++) {
-          const sx = Math.random() * W, sy = Math.random() * H;
-          const len = 8 + bass * 15;
-          ctx.beginPath(); ctx.moveTo(sx, sy);
-          ctx.lineTo(sx + cam.vx * len * 3000, sy + cam.vy * len * 3000);
-          ctx.strokeStyle = `rgba(180,200,255,${0.04 + bass * 0.06})`; ctx.lineWidth = 0.5; ctx.stroke();
+      // (Warp streaks removed — no wind in space. Forward z-flight radial effect handles speed visualization.)
+
+      // ── Ambient cosmic dust (always present, sways with audio) ──
+      if (isPlaying && deepSpaceOpacity > 0.5) {
+        const dustCount = Math.floor(2 + energy * 4);
+        for (let i = 0; i < dustCount; i++) {
+          const dx = Math.random() * W;
+          const dy = H * 0.2 + Math.random() * H * 0.6;
+          const dr = 15 + Math.random() * 30;
+          const dustHue = 200 + Math.random() * 80;
+          const dg = ctx.createRadialGradient(dx, dy, 0, dx, dy, dr);
+          dg.addColorStop(0, `hsla(${dustHue}, 40%, 60%, ${0.012 + energy * 0.008})`);
+          dg.addColorStop(1, 'transparent');
+          ctx.fillStyle = dg; ctx.beginPath(); ctx.arc(dx, dy, dr, 0, Math.PI * 2); ctx.fill();
         }
       }
     };
@@ -746,5 +895,6 @@ export default function SpaceBackground() {
     return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', resize); };
   }, []);
 
-  return <canvas ref={canvasRef} style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }} />;
+  const mode = useUIStore(s => s.mode);
+  return <canvas ref={canvasRef} style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none', display: mode === 'dark' ? 'block' : 'none' }} />;
 }

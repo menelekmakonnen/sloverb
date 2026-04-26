@@ -1,27 +1,66 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useLibraryStore } from '../../stores/libraryStore';
 import { usePlayerStore } from '../../stores/playerStore';
 import { useUIStore } from '../../stores/uiStore';
 import { motion } from 'framer-motion';
-import { Music, Video, Disc3, Play, FolderOpen, Search, Trash2 } from 'lucide-react';
+import { Music, Play, FolderOpen, Search, Trash2, ChevronLeft, ChevronRight, Disc3, Clock } from 'lucide-react';
 import ArtThumb from '../../components/ArtThumb';
 import FilterDrawer from '../../components/FilterDrawer';
 import { playbackEngine } from '../../lib/playbackEngine';
-import { detectBPM } from '../../lib/audioEngine';
+
+/* ── Shared UI ── */
+function HScrollRow({ title, children }) {
+  const ref = useRef(null);
+  const scroll = (dir) => ref.current?.scrollBy({ left: dir * 280, behavior: 'smooth' });
+  return (
+    <div style={{ marginBottom: 36 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <h3 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: 0, letterSpacing: '-0.02em' }}>{title}</h3>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => scroll(-1)} className="btn btn-ghost" style={{ width: 30, height: 30, padding: 0, borderRadius: '50%' }}><ChevronLeft size={16} /></button>
+          <button onClick={() => scroll(1)} className="btn btn-ghost" style={{ width: 30, height: 30, padding: 0, borderRadius: '50%' }}><ChevronRight size={16} /></button>
+        </div>
+      </div>
+      <div ref={ref} style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'none' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function TrackCard({ item, onPlay, onContextMenu }) {
+  return (
+    <motion.div
+      whileHover={{ y: -4, scale: 1.02 }}
+      onClick={() => onPlay(item)}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, item); }}
+      style={{
+        width: 160, flexShrink: 0, cursor: 'pointer', borderRadius: 10, overflow: 'hidden',
+        background: 'var(--bg-surface)', border: '1px solid var(--glass-border)',
+      }}
+    >
+      <ArtThumb path={item.path || item.id} seed={item.name} size={160} style={{ height: 130, width: 160, borderRadius: 0 }}>
+        <div style={{ position: 'absolute', bottom: 8, right: 8, width: 34, height: 34, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0, transition: 'opacity 0.2s' }} className="play-hover">
+          <Play size={14} color="#fff" style={{ marginLeft: 2 }} />
+        </div>
+      </ArtThumb>
+      <div style={{ padding: '10px 12px' }}>
+        <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</p>
+        <p style={{ margin: '3px 0 0', fontSize: 11, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.artist || 'Unknown Artist'}</p>
+      </div>
+    </motion.div>
+  );
+}
 
 export default function LibraryView() {
   const { songs, sortBy, setSortBy, searchQuery, setSearchQuery, getSortedSongs, loadFromDisk } = useLibraryStore();
-  const { setActiveView } = useUIStore();
-  const { addToast } = useUIStore();
+  const { setActiveView, addToast, openContextMenu } = useUIStore();
+  
   const sorted = getSortedSongs();
-  const [filteredIds, setFilteredIds] = useState(null);
-  // Apply filter on top of sorted — preserves sort order
-  const displaySongs = filteredIds
-    ? sorted.filter(s => filteredIds.has(s.id || s.path))
-    : sorted;
+  const [filteredSongs, setFilteredSongs] = useState(null);
+  const displaySongs = filteredSongs || sorted;
 
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState('');
+  useEffect(() => { loadFromDisk(); }, []);
 
   const handlePlayAll = async (tracks) => {
     if (!tracks || tracks.length === 0 || !window.electronAPI) return;
@@ -32,13 +71,10 @@ export default function LibraryView() {
       const f = new File([buf], name, { type: name.endsWith('.mp4') ? 'video/mp4' : 'audio/wav' });
       f.path = first.path || first.id;
       playbackEngine.loadFileAndPlay(f, { name, path: first.path, artist: first.artist, album: first.album });
-      const store = usePlayerStore.getState();
-      store.setQueue(tracks.slice(1).map(t => ({ type: 'library', name: t.name, path: t.path || t.id, artist: t.artist, album: t.album })));
+      usePlayerStore.getState().setQueue(tracks.slice(1).map(t => ({ type: 'library', name: t.name, path: t.path || t.id, artist: t.artist, album: t.album })));
       addToast(`Playing ${tracks.length} tracks`, 'success');
     } catch { addToast('Failed to play', 'error'); }
   };
-
-  useEffect(() => { loadFromDisk(); }, []);
 
   const handleLoadFolder = async () => {
     if (!window.electronAPI) return;
@@ -60,7 +96,6 @@ export default function LibraryView() {
       f.path = item.path || item.id;
       usePlayerStore.getState().setFileName(item.name);
       usePlayerStore.getState().setTrack(item);
-      // Switch to studio to load and play
       setActiveView('studio');
       addToast(`Loading: ${item.name}`, 'info');
     } catch (e) { addToast('Failed to load track', 'error'); }
@@ -73,65 +108,57 @@ export default function LibraryView() {
     addToast('Removed from library', 'info');
   };
 
-  const handleScanBPM = async () => {
-    if (isScanning || !window.electronAPI) return;
-    const unscanned = songs.filter(s => !s.bpm && !s.name?.endsWith('.mp4') && s.type !== 'video');
-    if (unscanned.length === 0) {
-      addToast('All audio tracks already have BPM data', 'info');
-      return;
-    }
-    
-    setIsScanning(true);
-    let done = 0;
-    
-    for (const song of unscanned) {
-      setScanProgress(`Scanning BPM: ${done}/${unscanned.length}`);
-      try {
-        const buffer = await window.electronAPI.readFile(song.path || song.id);
-        const f = new File([buffer], song.name, { type: 'audio/wav' });
-        const arrBuf = await f.arrayBuffer();
-        
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const decoded = await ctx.decodeAudioData(arrBuf);
-        const bpm = await detectBPM(decoded);
-        
-        // Update song directly in memory
-        song.bpm = bpm;
-      } catch (e) {
-        console.error('Failed to get BPM for', song.name, e);
+  // Sections Data
+  const recentlyAdded = useMemo(() => {
+    return [...songs].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)).slice(0, 15);
+  }, [songs]);
+
+  const groupedSongs = useMemo(() => {
+    const groups = {};
+    displaySongs.forEach(song => {
+      let key = 'Tracks';
+      if (sortBy.startsWith('title')) {
+        key = (song.name || '#').charAt(0).toUpperCase();
+        if (!/[A-Z]/.test(key)) key = '#';
+      } else if (sortBy.startsWith('artist')) {
+        key = song.artist || 'Unknown Artist';
+      } else if (sortBy.startsWith('album')) {
+        key = song.album || 'Unknown Album';
+      } else if (sortBy.startsWith('date')) {
+        const d = new Date(song.timestamp || 0);
+        key = d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
       }
-      done++;
-    }
-    
-    // Save the entire updated library memory to disk
-    await useLibraryStore.getState().saveToDisk();
-    await loadFromDisk();
-    setIsScanning(false);
-    setScanProgress('');
-    addToast('BPM scanning complete!', 'success');
-  };
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(song);
+    });
+    // Sort keys based on current sort direction
+    const sortedKeys = Object.keys(groups).sort((a, b) => {
+       if (sortBy.endsWith('Desc')) return b.localeCompare(a);
+       return a.localeCompare(b);
+    });
+    return sortedKeys.map(k => ({ title: k, items: groups[k] }));
+  }, [displaySongs, sortBy]);
 
   return (
     <div style={{ height: '100%', overflow: 'auto', padding: '24px 28px', position: 'relative' }}>
-      <FilterDrawer songs={songs} onFilter={(filtered) => {
-        if (!filtered || filtered.length === songs.length) { setFilteredIds(null); }
-        else { setFilteredIds(new Set(filtered.map(s => s.id || s.path))); }
-      }} onPlayAll={handlePlayAll} />
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ maxWidth: 800, margin: '0 auto' }}>
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+      <FilterDrawer songs={songs} onFilter={setFilteredSongs} onPlayAll={handlePlayAll} />
+      
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ maxWidth: 1000, margin: '0 auto' }}>
+        
+        {/* Header Controls */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 32, flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', margin: '0 0 4px', letterSpacing: '-0.02em' }}>Library</h2>
-            <p style={{ fontSize: 12, color: 'var(--text-dim)', margin: 0 }}>{displaySongs.length} of {songs.length} tracks</p>
+            <h2 style={{ fontSize: 32, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px', letterSpacing: '-0.03em' }}>Library</h2>
+            <p style={{ fontSize: 13, color: 'var(--accent)', margin: 0, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {displaySongs.length} Tracks • {new Set(displaySongs.map(s=>s.artist)).size} Artists
+            </p>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{ position: 'relative' }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
               <input
                 value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search library..."
-                className="input"
-                style={{ paddingLeft: 32, width: 200 }}
+                placeholder="Search library..." className="input" style={{ paddingLeft: 32, width: 220 }}
               />
             </div>
             <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="input" style={{ width: 'auto', padding: '7px 10px' }}>
@@ -144,79 +171,88 @@ export default function LibraryView() {
               <option value="random">Shuffle</option>
             </select>
             {window.electronAPI && (
-              <>
-                <button onClick={handleScanBPM} disabled={isScanning} className="btn btn-accent-soft" style={{ opacity: isScanning ? 0.7 : 1 }}>
-                  {isScanning ? scanProgress : 'Scan BPM'}
-                </button>
-                <button onClick={handleLoadFolder} className="btn btn-primary">
-                  <FolderOpen size={14} /> Import Folder
-                </button>
-              </>
+              <button onClick={handleLoadFolder} className="btn btn-accent-soft">
+                <FolderOpen size={14} /> Import
+              </button>
             )}
           </div>
         </div>
 
-        {/* Track List */}
         {displaySongs.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '80px 20px' }}>
-            <Music size={56} color="var(--text-dim)" style={{ marginBottom: 20, opacity: 0.4 }} />
-            <p style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', margin: '0 0 8px' }}>Your Library is Empty</p>
-            <p style={{ fontSize: 13, color: 'var(--text-dim)', margin: '0 0 24px' }}>Import a folder or drop files in the Studio to get started.</p>
+          <div style={{ textAlign: 'center', padding: '100px 20px' }}>
+            <Disc3 size={64} color="var(--text-dim)" style={{ marginBottom: 24, opacity: 0.3 }} />
+            <p style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)', margin: '0 0 8px' }}>Your Library is Empty</p>
+            <p style={{ fontSize: 14, color: 'var(--text-dim)', margin: '0 0 24px' }}>Import a folder to start building your collection.</p>
             {window.electronAPI && (
-              <button onClick={handleLoadFolder} className="btn btn-primary" style={{ padding: '10px 20px' }}>
+              <button onClick={handleLoadFolder} className="btn btn-primary" style={{ padding: '10px 24px' }}>
                 <FolderOpen size={16} /> Import Folder
               </button>
             )}
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {displaySongs.map((item, i) => {
-              const hash = (item.id || '').split('').reduce((a, b) => a + b.charCodeAt(0), 0);
-              const h1 = hash % 360;
-              const h2 = (h1 + 40) % 360;
-              return (
-                <motion.div
-                  key={item.id}
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: Math.min(i * 0.02, 0.5) }}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '8px 12px', borderRadius: 10,
-                    background: 'transparent',
-                    transition: 'all 0.15s',
-                    cursor: 'pointer',
-                    group: true,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.querySelector('.track-actions').style.opacity = '1'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.querySelector('.track-actions').style.opacity = '0'; }}
-                  onDoubleClick={() => handlePlay(item)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    useUIStore.getState().openContextMenu(e.clientX, e.clientY, item);
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
-                    <ArtThumb path={item.path || item.id} seed={item.name} size={40} type={item.type === 'video' ? 'video' : 'track'} />
-                    <div style={{ minWidth: 0 }}>
-                      <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</p>
-                      <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-dim)' }}>{item.artist || 'Unknown Artist'} • {new Date(item.timestamp).toLocaleDateString()}</p>
-                    </div>
+          <>
+            {/* Horizontal Sections (Only if no search/filter to keep it clean) */}
+            {!searchQuery && (!filteredSongs || filteredSongs.length === songs.length) && recentlyAdded.length > 0 && (
+              <HScrollRow title="Recently Added">
+                {recentlyAdded.map(item => (
+                  <TrackCard key={`recent-${item.id}`} item={item} onPlay={handlePlay} onContextMenu={(e, i) => openContextMenu(e.clientX, e.clientY, i)} />
+                ))}
+              </HScrollRow>
+            )}
+
+            {/* Exhaustive Grouped List */}
+            <div style={{ marginTop: 24 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                 <h3 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: 0 }}>All Tracks</h3>
+                 <button onClick={() => handlePlayAll(displaySongs)} className="btn btn-primary" style={{ padding: '6px 16px', fontSize: 12, borderRadius: 20 }}>
+                   <Play size={12}/> Play Filtered
+                 </button>
+              </div>
+
+              {groupedSongs.map(group => (
+                <div key={group.title} style={{ marginBottom: 32 }}>
+                  <h4 style={{ fontSize: 14, color: 'var(--text-dim)', borderBottom: '1px solid var(--glass-border)', paddingBottom: 8, marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    {group.title} <span style={{ opacity: 0.5, marginLeft: 8, fontSize: 11 }}>({group.items.length})</span>
+                  </h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 8 }}>
+                    {group.items.map((item, i) => (
+                      <div
+                        key={item.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '8px 12px', borderRadius: 10, background: 'var(--bg-surface)', border: '1px solid var(--glass-border)',
+                          cursor: 'pointer', transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.querySelector('.track-actions').style.opacity = '1'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.querySelector('.track-actions').style.opacity = '0'; }}
+                        onDoubleClick={() => handlePlay(item)}
+                        onContextMenu={(e) => { e.preventDefault(); openContextMenu(e.clientX, e.clientY, item); }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
+                          <ArtThumb path={item.path || item.id} seed={item.name} size={40} type={item.type === 'video' ? 'video' : 'track'} />
+                          <div style={{ minWidth: 0 }}>
+                            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</p>
+                            <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.artist || 'Unknown Artist'} • {item.album || 'Single'}</p>
+                          </div>
+                        </div>
+                        <div className="track-actions" style={{ display: 'flex', gap: 4, opacity: 0, transition: 'opacity 0.15s', flexShrink: 0 }}>
+                          <button onClick={(e) => { e.stopPropagation(); handlePlay(item); }} className="btn btn-accent-soft" style={{ padding: '6px', borderRadius: '50%' }}>
+                            <Play size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div className="track-actions" style={{ display: 'flex', gap: 4, opacity: 0, transition: 'opacity 0.15s', flexShrink: 0 }}>
-                    <button onClick={(e) => { e.stopPropagation(); handlePlay(item); }} className="btn btn-accent-soft" style={{ padding: '4px 10px', fontSize: 11, borderRadius: 20 }}>
-                      <Play size={12} /> Play
-                    </button>
-                    <button onClick={(e) => { e.stopPropagation(); handleRemove(item.id); }} className="btn btn-ghost" style={{ padding: '4px 8px', borderRadius: 20, color: 'var(--text-dim)' }}>
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </motion.div>
+      <style>{`
+        .play-hover { opacity: 0 !important; }
+        div:hover > .play-hover { opacity: 1 !important; }
+      `}</style>
     </div>
   );
 }

@@ -149,61 +149,34 @@ function QuickYouTubeInput() {
 
   const handleLoad = async () => {
     if (!url.trim() || !window.electronAPI) return;
+    const urlToFetch = url.trim();
+    const dlId = Date.now().toString();
+    const store = usePlayerStore.getState();
+    setUrl('');
     setLoading(true);
-    addToast('Fetching from YouTube...', 'info');
-
-    const progressHandler = (event, msg) => addToast(msg, 'info');
-    if (window.electronAPI.onYoutubeProgress) window.electronAPI.onYoutubeProgress(progressHandler);
-
+    store.addActiveDownload({ id: dlId, title: 'Fetching...', url: urlToFetch, status: 'downloading', timestamp: Date.now() });
+    addToast('Downloading from YouTube...', 'info');
     try {
-      const results = await window.electronAPI.fetchYoutube(url.trim());
-      if (!results || results.length === 0) throw new Error("No media found");
-
-      // Save ALL tracks to library
-      for (let i = 0; i < results.length; i++) {
-          const item = results[i];
-          await window.electronAPI.addToLibrary({
-              id: item.id || item.path || Date.now().toString() + i,
-              name: item.title,
-              title: item.title,
-              path: item.path,
-              type: item.type || 'audio',
-              artist: item.artist || 'YouTube',
-              album: item.album || '',
-              duration: item.duration || 0,
-              date: item.date || '',
-              timestamp: Date.now()
-          });
-      }
-
-      // Play first track
-      const result = results[0];
-      const rawBuffer = await window.electronAPI.readFile(result.path);
-      const ext = (result.path || '').split('.').pop()?.toLowerCase() || 'mp4';
-      const mimeMap = { mp3: 'audio/mpeg', m4a: 'audio/mp4', mp4: 'video/mp4', webm: 'audio/webm', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav' };
-      const mime = mimeMap[ext] || 'video/mp4';
-      
-      const file = new File([rawBuffer], `${result.title}.${ext}`, { type: mime });
-      file.path = result.path;
-      
-      usePlayerStore.getState().setFileName(result.title);
-      playbackEngine.loadFileAndPlay(file, { name: result.title, path: result.path, id: result.id, artist: result.artist || 'YouTube', type: 'youtube' });
-      
-      // Queue the rest
-      if (results.length > 1) {
-        const queue = results.slice(1).map(r => ({ type: 'library', name: r.title, path: r.path, id: r.id, artist: r.artist || 'YouTube' }));
-        usePlayerStore.getState().setQueue([...usePlayerStore.getState().queue, ...queue]);
-      }
-      
-      setActiveView('studio');
-      addToast(`Playing: ${result.title} (${results.length} saved to Library)`, 'success');
-
-      setUrl('');
+      const result = await window.electronAPI.fetchYoutube(urlToFetch);
+      store.updateActiveDownload(dlId, { title: result.title, status: 'done' });
+      const queueItem = result.libraryItem || {
+        name: result.title, path: result.path, id: result.id,
+        type: result.path?.endsWith('.mp4') ? 'video' : 'youtube',
+        artist: result.artist || 'YouTube', album: 'YouTube Downloads',
+      };
+      store.addToQueue(queueItem);
+      store.addToDownloadHistory({
+        title: result.title, artist: result.artist || 'YouTube',
+        path: result.path, size: result.size, timestamp: Date.now(), url: urlToFetch,
+      });
+      addToast(`Queued: ${result.title}`, 'success');
+      setTimeout(() => store.removeActiveDownload(dlId), 3000);
     } catch (e) {
-      addToast(e?.message || 'Failed to fetch from YouTube', 'error');
+      store.updateActiveDownload(dlId, { status: 'error', error: e?.message });
+      addToast('Failed to fetch from YouTube', 'error');
+      setTimeout(() => store.removeActiveDownload(dlId), 5000);
     } finally {
       setLoading(false);
-      if (window.electronAPI.offYoutubeProgress) window.electronAPI.offYoutubeProgress(progressHandler);
     }
   };
 

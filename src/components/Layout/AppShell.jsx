@@ -9,7 +9,7 @@ import ScrollNav from '../ScrollNav';
 import { useUIStore } from '../../stores/uiStore';
 import { usePlayerStore } from '../../stores/playerStore';
 import { PRESETS } from '../../lib/audioEngine.js';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import StudioView from '../../features/Studio/StudioView';
@@ -25,16 +25,6 @@ import FolderView from '../../features/Folders/FolderView';
 export default function AppShell() {
   const { activeView, mode, creditsTrack, setCreditsTrack, studioDrawerOpen, setStudioDrawerOpen, spaceAdventure } = useUIStore();
   const immersive = spaceAdventure === 'immersive';
-  const { fileName, currentTrack } = usePlayerStore();
-  
-  const [showMetadata, setShowMetadata] = useState(true);
-
-  useEffect(() => {
-    if (!immersive) return;
-    setShowMetadata(true);
-    const t = setTimeout(() => setShowMetadata(false), 5000);
-    return () => clearTimeout(t);
-  }, [fileName, immersive]);
 
   // Global scroll wheel → volume control (Ctrl+scroll to avoid hijacking page scroll)
   useEffect(() => {
@@ -76,21 +66,50 @@ export default function AppShell() {
       overflow: 'hidden',
       position: 'relative',
     }}>
-      {/* Cosmic Background */}
+      {/* Cosmic Background — completely unmounted in light mode */}
       {mode === 'dark' && <SpaceBackground />}
 
-      {/* Title Bar — hidden in immersive */}
-      {!immersive && <TitleBar />}
+      {/* Title Bar — animated fold-away */}
+      <AnimatePresence>
+        {!immersive && (
+          <motion.div
+            key="titlebar"
+            initial={{ y: -40, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -40, opacity: 0 }}
+            transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1], delay: immersive ? 0 : 0.15 }}
+            style={{ zIndex: 2, position: 'relative' }}
+          >
+            <TitleBar />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Main Area — hidden in immersive */}
-      {!immersive && (
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', zIndex: 1 }}>
-          <Sidebar />
-          <main style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-            {renderView()}
-          </main>
-        </div>
-      )}
+      {/* Main Area — sidebar slides left, content fades */}
+      <AnimatePresence>
+        {!immersive && (
+          <motion.div
+            key="main-area"
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1], delay: immersive ? 0 : 0.05 }}
+            style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', zIndex: 1 }}
+          >
+            <motion.div
+              initial={{ x: -220, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -220, opacity: 0 }}
+              transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+            >
+              <Sidebar />
+            </motion.div>
+            <main style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+              {renderView()}
+            </main>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Studio Drawer — slides up from NowPlayingBar */}
       <AnimatePresence>
@@ -160,44 +179,6 @@ export default function AppShell() {
             ))}
           </div>
 
-          {/* Immersive Metadata (Top Left) — elegant and visible */}
-          <div style={{
-            position: 'fixed', top: 40, left: 40, zIndex: 55,
-            display: 'flex', flexDirection: 'column', gap: 6,
-            pointerEvents: 'none',
-            textShadow: '0 2px 12px rgba(0,0,0,0.8)',
-            opacity: showMetadata ? 1 : 0,
-            transition: 'opacity 0.8s ease'
-          }}>
-            {fileName && (
-              <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: '-0.3px' }}>
-                {fileName}
-              </div>
-            )}
-            {currentTrack?.artist && (
-              <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.8)', fontWeight: 500 }}>
-                {currentTrack.artist}
-              </div>
-            )}
-            {currentTrack?.album && (
-              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>
-                Album: {currentTrack.album}
-              </div>
-            )}
-            {currentTrack?.year && (
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
-                Released: {currentTrack.year}
-              </div>
-            )}
-            {currentTrack?.links && currentTrack.links.map((link, i) => (
-              <a key={i} href={link.url} target="_blank" rel="noreferrer" style={{
-                fontSize: 12, color: 'var(--primary)', pointerEvents: 'auto', textDecoration: 'none', marginTop: 4
-              }}>
-                {link.label || link.url}
-              </a>
-            ))}
-          </div>
-
           {/* Exit & Normal View buttons — transparent by default, translucent on hover */}
           <div style={{
             position: 'fixed', bottom: 24, left: 24, zIndex: 55,
@@ -254,14 +235,12 @@ export default function AppShell() {
               e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)';
               e.currentTarget.style.boxShadow = '0 12px 48px rgba(0,0,0,0.6)';
               e.currentTarget.style.backdropFilter = 'blur(24px)';
-              setShowMetadata(true); // Fade in metadata on hover
             }}
             onMouseLeave={e => {
               e.currentTarget.style.background = 'rgba(10, 10, 30, 0.0)';
               e.currentTarget.style.borderColor = 'rgba(255,255,255,0.0)';
               e.currentTarget.style.boxShadow = 'none';
               e.currentTarget.style.backdropFilter = 'blur(0px)';
-              setShowMetadata(false); // Fade out metadata when leave
             }}
           >
             {/* Audio Presets Strip */}

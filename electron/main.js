@@ -64,36 +64,6 @@ if (!fs.existsSync(generationsDir)) {
     fs.mkdirSync(generationsDir, { recursive: true });
 }
 
-// ── Configurable download directory ──
-const settingsPath = path.join(app.getPath('userData'), 'settings.json');
-function getSettings() {
-    if (!fs.existsSync(settingsPath)) return {};
-    try { return JSON.parse(fs.readFileSync(settingsPath, 'utf8')); }
-    catch { return {}; }
-}
-function saveSettings(data) {
-    fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2), 'utf8');
-}
-function getDownloadDir() {
-    const settings = getSettings();
-    if (settings.downloadDir && fs.existsSync(settings.downloadDir)) return settings.downloadDir;
-    // Default: Windows Music folder
-    return app.getPath('music');
-}
-
-ipcMain.handle('get-settings', () => getSettings());
-ipcMain.handle('save-settings', (event, newSettings) => {
-    const current = getSettings();
-    const merged = { ...current, ...newSettings };
-    saveSettings(merged);
-    return merged;
-});
-ipcMain.handle('select-download-dir', async () => {
-    const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
-    if (result.canceled || result.filePaths.length === 0) return null;
-    return result.filePaths[0];
-});
-
 ipcMain.handle('save-generation', async (event, fileName, bufferData) => {
     const filePath = path.join(generationsDir, fileName);
     fs.writeFileSync(filePath, Buffer.from(bufferData));
@@ -258,6 +228,40 @@ ipcMain.handle('update-library-order', (event, newSongsList) => {
 
 // --- Phase 5: YouTube & Folder Scanning ---
 
+// YouTube downloads go to the user's Music folder
+const ytDownloadDir = path.join(app.getPath('music'), 'Sloverb');
+if (!fs.existsSync(ytDownloadDir)) {
+    fs.mkdirSync(ytDownloadDir, { recursive: true });
+}
+
+// Locate ffmpeg for yt-dlp stream merging
+const ffmpegSearchPaths = [
+    path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Packages'),
+    'C:\\ffmpeg\\bin',
+    path.join(process.env.ProgramFiles || '', 'ffmpeg', 'bin'),
+];
+let ffmpegDir = '';
+for (const base of ffmpegSearchPaths) {
+    try {
+        if (!fs.existsSync(base)) continue;
+        // Recursively find ffmpeg.exe
+        const walk = (dir) => {
+            for (const f of fs.readdirSync(dir)) {
+                const fp = path.join(dir, f);
+                try {
+                    const st = fs.statSync(fp);
+                    if (st.isDirectory()) { const r = walk(fp); if (r) return r; }
+                    else if (f === 'ffmpeg.exe') return path.dirname(fp);
+                } catch (e) { }
+            }
+            return null;
+        };
+        const found = walk(base);
+        if (found) { ffmpegDir = found; break; }
+    } catch (e) { }
+}
+console.log('[FFmpeg] Location:', ffmpegDir || 'NOT FOUND (merging disabled)');
+
 ipcMain.handle('fetch-youtube', async (event, url) => {
     try {
         let validUrl = url.trim();
@@ -265,143 +269,108 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
             validUrl = 'https://' + validUrl;
         }
         let cleanUrl = validUrl;
-        let isPlaylist = false;
         try {
             const parsed = new URL(validUrl);
-            if (parsed.hostname.includes('music.youtube.com') || parsed.hostname.includes('youtube.com')) {
+            if (parsed.hostname.includes('youtube.com')) {
                 const v = parsed.searchParams.get('v');
-                const list = parsed.searchParams.get('list');
-                if (list) { cleanUrl = `https://www.youtube.com/playlist?list=${list}`; isPlaylist = true; }
-                else if (v) cleanUrl = `https://www.youtube.com/watch?v=${v}`;
+                if (v) cleanUrl = `https://www.youtube.com/watch?v=${v}`;
             } else if (parsed.hostname.includes('youtu.be')) {
-                const videoId = parsed.pathname.slice(1).split('?')[0];
-                cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
+                cleanUrl = `https://www.youtube.com/watch?v=${parsed.pathname.slice(1)}`;
             }
         } catch (e) {
             console.error("URL Parsing failed:", e);
         }
 
-        const downloadDir = getDownloadDir();
-        if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir, { recursive: true });
-
+        // Step 1: Get video info
         console.log('[YouTube] Fetching info for:', cleanUrl);
-        event.sender.send('youtube-download-progress', 'Fetching info from YouTube...');
-        
-        const infoFlags = {
+        const info = await youtubedl(cleanUrl, {
             dumpJson: true,
+            noPlaylist: true,
             noCheckCertificates: true,
             noWarnings: true,
-            preferFreeFormats: true,
+            preferFreeFormats: true
+        });
+
+        const rawTitle = info.title ? info.title.replace(/[^\w\s\-]/g, '').trim() : `youtube_${Date.now()}`;
+        const artist = (info.uploader || info.channel || 'YouTube').replace(/[^\w\s\-]/g, '').trim();
+        const displayTitle = rawTitle.substring(0, 80); // Readable title with spaces for UI
+        const safeTitle = displayTitle.replace(/\s+/g, '_'); // No spaces for filename
+        const safeArtist = artist.substring(0, 40).replace(/\s+/g, '_');
+        const stamp = Date.now();
+        const fileName = `${safeTitle}_-_${safeArtist}`;
+        const outTemplate = path.join(ytDownloadDir, `${fileName}.%(ext)s`);
+
+        console.log('[YouTube] Downloading best video+audio for:', displayTitle, 'by', artist);
+
+        // Step 2: Try best video+audio merge via ffmpeg, fallback to single stream
+        // Always aim for highest quality available
+        try {
+            await youtubedl(cleanUrl, {
+                format: 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio',
+                output: outTemplate,
+                mergeOutputFormat: 'mp4',
+                ffmpegLocation: ffmpegDir || undefined,
+                noPlaylist: true,
+                noCheckCertificates: true,
+                noWarnings: true,
+            });
+        } catch (mergeErr) {
+            console.log('[YouTube] Merge failed, trying single-stream:', mergeErr.message);
+            await youtubedl(cleanUrl, {
+                format: 'best[ext=mp4]/best',
+                output: outTemplate,
+                ffmpegLocation: ffmpegDir || undefined,
+                noPlaylist: true,
+                noCheckCertificates: true,
+                noWarnings: true,
+            });
+        }
+
+        // Step 3: Find the actual output file
+        const dirFiles = fs.readdirSync(ytDownloadDir);
+        const outputFile = dirFiles.find(f => f.startsWith(fileName));
+
+        if (!outputFile) {
+            throw new Error('Download completed but output file not found');
+        }
+
+        const filepath = path.join(ytDownloadDir, outputFile);
+        const fileSize = fs.statSync(filepath).size;
+        console.log('[YouTube] Downloaded:', filepath, `(${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
+
+        // Step 4: Auto-add to library
+        const ext = path.extname(outputFile).toLowerCase();
+        const libraryItem = {
+            id: filepath,
+            type: ext === '.mp4' ? 'video' : 'raw',
+            name: displayTitle,
+            path: filepath,
+            artist: artist,
+            album: 'YouTube Downloads',
+            timestamp: Date.now(),
         };
-        if (isPlaylist) {
-            infoFlags.flatPlaylist = true;
-        }
-        
-        const info = await youtubedl(cleanUrl, infoFlags);
-        const entries = info._type === 'playlist' && info.entries ? info.entries : [info];
-        const results = [];
-        
-        console.log(`[YouTube] Found ${entries.length} items to download`);
-        
-        for (let i = 0; i < entries.length; i++) {
-            const entry = entries[i];
-            if (!entry) continue;
-            
-            const rawTitle = entry.title ? entry.title.replace(/[^\w\s\-()\[\],.&']/g, '').trim() : `youtube_${Date.now()}`;
-            const artist = (entry.artist || entry.uploader || entry.channel || 'Unknown Artist').replace(/[^\w\s\-,.&']/g, '').trim();
-            const uploadDate = entry.upload_date || ''; // YYYYMMDD
-            const formattedDate = uploadDate ? `${uploadDate.slice(0,4)}-${uploadDate.slice(4,6)}-${uploadDate.slice(6,8)}` : '';
-            const album = entry.album || '';
-            const duration = entry.duration || 0;
-            
-            // Build rich filename: "Artist - Title [2024-01-15]"
-            let fileName = artist !== 'Unknown Artist' ? `${artist} - ${rawTitle}` : rawTitle;
-            if (formattedDate) fileName += ` [${formattedDate}]`;
-            const safeFileName = fileName.substring(0, 120).replace(/[<>:"/\\|?*]/g, '');
-            
-            const outPath = path.join(downloadDir, safeFileName + '.%(ext)s');
-            
-            let entryUrl;
-            if (entry.webpage_url) entryUrl = entry.webpage_url;
-            else if (entry.url && entry.url.startsWith('http')) entryUrl = entry.url;
-            else if (entry.id) entryUrl = `https://www.youtube.com/watch?v=${entry.id}`;
-            else entryUrl = cleanUrl;
-
-            console.log(`[YouTube] Downloading (${i+1}/${entries.length}):`, safeFileName);
-            if (entries.length > 1) {
-                event.sender.send('youtube-download-progress', `Downloading ${i+1} of ${entries.length}: ${rawTitle}...`);
-            } else {
-                event.sender.send('youtube-download-progress', `Downloading: ${rawTitle}...`);
-            }
-
+        // Read existing library and append
+        let libData = { songs: [], playlists: [] };
+        if (fs.existsSync(libraryPath)) {
             try {
-                // Download best video+audio as mp4
-                await youtubedl(entryUrl, {
-                    format: 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-                    mergeOutputFormat: 'mp4',
-                    output: outPath,
-                    noPlaylist: true,
-                    noCheckCertificates: true,
-                    noWarnings: true,
-                });
-
-                const dirFiles = fs.readdirSync(downloadDir);
-                const outputFile = dirFiles.find(f => f.startsWith(safeFileName.substring(0, 30)) && !f.endsWith('.part'));
-
-                if (outputFile) {
-                    const filepath = path.join(downloadDir, outputFile);
-                    console.log('[YouTube] Downloaded:', filepath);
-                    results.push({
-                        title: rawTitle,
-                        path: filepath,
-                        id: filepath,
-                        artist,
-                        album,
-                        date: formattedDate,
-                        duration,
-                        type: 'video',
-                    });
-                }
-            } catch (dlErr) {
-                console.error(`[YouTube] Failed to download ${rawTitle}:`, dlErr.message);
-                // Fallback: try downloading without merge (no ffmpeg)
-                try {
-                    await youtubedl(entryUrl, {
-                        format: 'best[ext=mp4]/best',
-                        output: outPath,
-                        noPlaylist: true,
-                        noCheckCertificates: true,
-                        noWarnings: true,
-                    });
-                    const dirFiles = fs.readdirSync(downloadDir);
-                    const outputFile = dirFiles.find(f => f.startsWith(safeFileName.substring(0, 30)) && !f.endsWith('.part'));
-                    if (outputFile) {
-                        const filepath = path.join(downloadDir, outputFile);
-                        console.log('[YouTube] Downloaded (fallback):', filepath);
-                        results.push({ title: rawTitle, path: filepath, id: filepath, artist, album, date: formattedDate, duration, type: 'video' });
-                    }
-                } catch (fb) {
-                    console.error(`[YouTube] Fallback also failed for ${rawTitle}:`, fb.message);
-                }
-            }
+                const parsed = JSON.parse(fs.readFileSync(libraryPath, 'utf8'));
+                if (Array.isArray(parsed)) libData.songs = parsed;
+                else libData = parsed;
+            } catch (e) { }
         }
-        
-        if (results.length === 0) {
-            throw new Error('Download completed but no output files were found');
+        if (!libData.songs.find(s => s.id === libraryItem.id)) {
+            libData.songs.unshift(libraryItem);
+            fs.writeFileSync(libraryPath, JSON.stringify(libData, null, 2), 'utf8');
         }
+        console.log('[YouTube] Added to library:', displayTitle);
 
-        return results;
+        return { title: displayTitle, artist, path: filepath, id: filepath, size: fileSize, libraryItem };
 
     } catch (e) {
         console.error("[YouTube] Fetch Error:", e.message || e);
-        const msg = e.message || 'Unknown error';
-        if (msg.includes('Sign in') || msg.includes('bot')) {
-            throw new Error('YouTube is requesting sign-in verification. Try again in a few minutes, or use a different link.');
-        }
-        throw new Error(`YouTube download failed: ${msg}`);
+        throw new Error(`YouTube download failed: ${e.message || 'Unknown error'}`);
     }
 });
-
 
 ipcMain.handle('locate-file', async (event, targetPath) => {
     if (fs.existsSync(targetPath)) {

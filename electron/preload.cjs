@@ -19,19 +19,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveLibrary: (data) => ipcRenderer.invoke('save-library', data),
     locateFile: (p) => ipcRenderer.invoke('locate-file', p),
     getAlbumArt: (p) => ipcRenderer.invoke('get-album-art', p),
-    getSettings: () => ipcRenderer.invoke('get-settings'),
-    saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
-    selectDownloadDir: () => ipcRenderer.invoke('select-download-dir'),
     setDiscordActivity: (activity) => ipcRenderer.invoke('set-discord-activity', activity),
     onMediaPlayPause: (callback) => ipcRenderer.on('media-play-pause', callback),
     onMediaNext: (callback) => ipcRenderer.on('media-next', callback),
     onOpenFile: (callback) => ipcRenderer.on('open-file', callback),
-    onYoutubeProgress: (callback) => ipcRenderer.on('youtube-download-progress', callback),
-    offYoutubeProgress: (callback) => ipcRenderer.removeListener('youtube-download-progress', callback),
     removeMediaListeners: () => {
         ipcRenderer.removeAllListeners('media-play-pause');
         ipcRenderer.removeAllListeners('media-next');
         ipcRenderer.removeAllListeners('open-file');
-        ipcRenderer.removeAllListeners('youtube-download-progress');
     }
 });

@@ -17,7 +17,7 @@ export const usePlayerStore = create((set, get) => ({
   isProcessing: false,
   loadingText: 'Loading...',
   progress: 0,
-  masterVolume: 0.9,
+  masterVolume: parseFloat(localStorage.getItem('sloverb_volume')) || 0.9,
   isRepeat: false,
   isShuffle: false,
   autoPlay: localStorage.getItem('sloverb_autoplay') !== 'false',
@@ -39,6 +39,8 @@ export const usePlayerStore = create((set, get) => ({
 
   // ── YouTube ──
   youtubeUrl: '',
+  downloadHistory: JSON.parse(localStorage.getItem('sloverb_dl_history') || '[]'),
+  activeDownloads: [], // { id, title, status: 'downloading'|'merging'|'done'|'error', progress, timestamp }
 
   // ── Actions ──
   setTrack: (track) => set({ currentTrack: track }),
@@ -52,7 +54,10 @@ export const usePlayerStore = create((set, get) => ({
   setIsProcessing: (v) => set({ isProcessing: v }),
   setLoadingText: (t) => set({ loadingText: t }),
   setProgress: (p) => set({ progress: p }),
-  setMasterVolume: (v) => set({ masterVolume: v }),
+  setMasterVolume: (v) => {
+    localStorage.setItem('sloverb_volume', v);
+    set({ masterVolume: v });
+  },
   toggleRepeat: () => set(s => ({ isRepeat: !s.isRepeat })),
   toggleShuffle: () => set(s => ({ isShuffle: !s.isShuffle })),
   toggleAutoPlay: () => set(s => {
@@ -77,6 +82,23 @@ export const usePlayerStore = create((set, get) => ({
   clearQueue: () => set({ queue: [] }),
   setCurrentQueueIndex: (i) => set({ currentQueueIndex: i }),
   setPlaybackContext: (ctx) => set({ playbackContext: ctx }),
+
+  addActiveDownload: (dl) => set(s => ({ activeDownloads: [...s.activeDownloads, dl] })),
+  updateActiveDownload: (id, update) => set(s => ({
+    activeDownloads: s.activeDownloads.map(d => d.id === id ? { ...d, ...update } : d)
+  })),
+  removeActiveDownload: (id) => set(s => ({
+    activeDownloads: s.activeDownloads.filter(d => d.id !== id)
+  })),
+  addToDownloadHistory: (item) => set(s => {
+    const history = [item, ...s.downloadHistory].slice(0, 100);
+    localStorage.setItem('sloverb_dl_history', JSON.stringify(history));
+    return { downloadHistory: history };
+  }),
+  clearDownloadHistory: () => {
+    localStorage.removeItem('sloverb_dl_history');
+    set({ downloadHistory: [] });
+  },
 
   setIsExporting: (v) => set({ isExporting: v }),
   setExportProgress: (p) => set({ exportProgress: p }),

@@ -893,11 +893,13 @@ export default function SlowedReverbTool() {
     try {
       const data = await window.electronAPI.fetchYoutube(youtubeUrl);
       setProgress(70);
-      setLoadingText("Decoding YouTube audio...");
+      setLoadingText("Reading downloaded audio...");
+      // Read file buffer via IPC (avoids large IPC payload issues)
+      const buffer = await window.electronAPI.readFile(data.path);
       const ext = (data.path || '').split('.').pop()?.toLowerCase() || 'webm';
       const mimeMap = { mp3: 'audio/mpeg', m4a: 'audio/mp4', webm: 'audio/webm', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav' };
       const mime = mimeMap[ext] || 'audio/webm';
-      const f = new File([data.buffer], `${data.title}.${ext}`, { type: mime });
+      const f = new File([buffer], `${data.title}.${ext}`, { type: mime });
       f.path = data.path || `youtube_${Date.now()}`;
       await loadFile(f);
       setYoutubeUrl(""); // Clear input on success

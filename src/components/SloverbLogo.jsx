@@ -32,8 +32,16 @@ export default function SloverbLogo({ size = 36 }) {
         </radialGradient>
       </defs>
 
+      {/* Dark space background */}
+      <rect width="48" height="48" rx="8" fill="#06060e" />
+      {/* Tiny stars */}
+      <circle cx="6" cy="8" r="0.4" fill="rgba(200,210,255,0.3)" />
+      <circle cx="40" cy="6" r="0.3" fill="rgba(200,210,255,0.25)" />
+      <circle cx="42" cy="38" r="0.35" fill="rgba(200,210,255,0.2)" />
+      <circle cx="8" cy="40" r="0.3" fill="rgba(200,210,255,0.25)" />
+
       {/* Background disc */}
-      <circle cx="24" cy="24" r="22" fill="url(#logo-grad)" className="logo-disc" />
+      <circle cx="24" cy="24" r="18" fill="url(#logo-grad)" className="logo-disc" />
 
       {/* Inner rings */}
       <circle cx="24" cy="24" r="16" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="0.6" />
