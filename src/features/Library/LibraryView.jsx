@@ -228,7 +228,19 @@ export default function LibraryView() {
               <option value="artistAsc">Artist A–Z</option><option value="albumAsc">Album A–Z</option>
               <option value="random">Shuffle</option>
             </select>
-            {window.electronAPI && <button onClick={handleLoadFolder} className="btn btn-accent-soft"><FolderOpen size={14} /> Import</button>}
+            {window.electronAPI && (
+              <>
+                <button onClick={async () => {
+                  const s = useLibraryStore.getState();
+                  if (s.enrichMetadata) {
+                    addToast('Auto-Fixing metadata...', 'info');
+                    await s.enrichMetadata();
+                    addToast('Metadata updated!', 'success');
+                  }
+                }} className="btn btn-ghost" title="Auto-Fix Unknown Artists"><Music size={14} /> Auto-Fix</button>
+                <button onClick={handleLoadFolder} className="btn btn-accent-soft"><FolderOpen size={14} /> Import</button>
+              </>
+            )}
           </div>
         </div>
 

@@ -18,7 +18,7 @@ export const usePlayerStore = create((set, get) => ({
   loadingText: 'Loading...',
   progress: 0,
   masterVolume: parseFloat(localStorage.getItem('sloverb_volume')) || 0.9,
-  isRepeat: false,
+  repeatMode: 0, // 0 = off, 1 = playlist, 2 = track
   isShuffle: false,
   autoPlay: localStorage.getItem('sloverb_autoplay') !== 'false',
 
@@ -42,7 +42,29 @@ export const usePlayerStore = create((set, get) => ({
   downloadHistory: JSON.parse(localStorage.getItem('sloverb_dl_history') || '[]'),
   activeDownloads: [], // { id, title, status: 'downloading'|'merging'|'done'|'error', progress, timestamp }
 
+  // ── Streaming ──
+  isStreaming: false,
+  streamTrack: null, // { id, title, channel, duration, thumbnail, url }
+
+  // ── YouTube Browser Connection ──
+  ytBrowser: { connected: false, browser: null },
+  streamHistory: JSON.parse(localStorage.getItem('sloverb_stream_history') || '[]'),
+  ytPlaylists: [],
+
   // ── Actions ──
+  loadYtPlaylists: async () => {
+    if (window.electronAPI) {
+      try {
+        console.log('[Store] Loading YT playlists...');
+        const p = await window.electronAPI.ytGetMyPlaylists();
+        console.log('[Store] YT playlists result:', p?.length || 0, 'items');
+        if (p && p.length > 0) set({ ytPlaylists: p });
+      } catch (e) {
+        console.error('[Store] loadYtPlaylists error:', e);
+      }
+    }
+  },
+
   setTrack: (track) => set({ currentTrack: track }),
   setAudioBuffer: (buf) => set({ audioBuffer: buf }),
   setFileName: (name) => set({ fileName: name }),
@@ -58,7 +80,7 @@ export const usePlayerStore = create((set, get) => ({
     localStorage.setItem('sloverb_volume', v);
     set({ masterVolume: v });
   },
-  toggleRepeat: () => set(s => ({ isRepeat: !s.isRepeat })),
+  toggleRepeat: () => set(s => ({ repeatMode: (s.repeatMode + 1) % 3 })),
   toggleShuffle: () => set(s => ({ isShuffle: !s.isShuffle })),
   toggleAutoPlay: () => set(s => {
     const next = !s.autoPlay;
@@ -104,6 +126,16 @@ export const usePlayerStore = create((set, get) => ({
   setExportProgress: (p) => set({ exportProgress: p }),
   setExportDone: (v) => set({ exportDone: v }),
   setYoutubeUrl: (u) => set({ youtubeUrl: u }),
+  setIsStreaming: (v) => set({ isStreaming: v }),
+  setStreamTrack: (t) => set({ streamTrack: t }),
+  setYtBrowser: (b) => set({ ytBrowser: b }),
+  addToStreamHistory: (track) => set(s => {
+    const exists = s.streamHistory.find(t => t.id === track.id);
+    const filtered = exists ? s.streamHistory.filter(t => t.id !== track.id) : s.streamHistory;
+    const history = [{ ...track, playedAt: Date.now() }, ...filtered].slice(0, 50);
+    localStorage.setItem('sloverb_stream_history', JSON.stringify(history));
+    return { streamHistory: history };
+  }),
 
   // ── Preset Logic ──
   applyPreset: (name, isMultiSelect) => {

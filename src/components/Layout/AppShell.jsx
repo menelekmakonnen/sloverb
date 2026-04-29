@@ -24,6 +24,7 @@ import AlbumsView from '../../features/Albums/AlbumsView';
 import HistoryView from '../../features/History/HistoryView';
 import SettingsView from '../../features/Settings/SettingsView';
 import FolderView from '../../features/Folders/FolderView';
+import StreamView from '../../features/Stream/StreamView';
 
 export default function AppShell() {
   const { activeView, mode, creditsTrack, setCreditsTrack, studioDrawerOpen, setStudioDrawerOpen, spaceAdventure, superImmersive, backgroundTheme, cycleBackgroundTheme } = useUIStore();
@@ -111,6 +112,7 @@ export default function AppShell() {
       case 'albums': return <AlbumsView />;
       case 'history': return <HistoryView />;
       case 'folders': return <FolderView />;
+      case 'stream': return <StreamView />;
       case 'settings': return <SettingsView />;
       default: return <HomeView />;
     }

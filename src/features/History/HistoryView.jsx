@@ -152,12 +152,28 @@ export default function HistoryView() {
             {/* Download History */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <span style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>Download History</span>
-              {downloadHistory.length > 0 && (
-                <button onClick={() => { clearDownloadHistory(); addToast('Download history cleared', 'info'); }}
-                  style={{ padding: '4px 10px', borderRadius: 16, fontSize: 10, color: 'var(--text-dim)', background: 'transparent', border: '1px solid var(--glass-border)', cursor: 'pointer' }}>
-                  <Trash2 size={10} />
-                </button>
-              )}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {downloadHistory.length > 0 && (
+                  <button onClick={() => {
+                    if (downloadHistory.length === 0) return;
+                    const store = usePlayerStore.getState();
+                    const first = downloadHistory[0];
+                    const rest = downloadHistory.slice(1).map(s => ({ ...s, name: s.title }));
+                    store.setQueue(rest);
+                    store.setPlaybackContext({ type: 'playlist', playlistId: 'downloads' });
+                    handlePlay(first);
+                  }}
+                  style={{ padding: '4px 10px', borderRadius: 16, fontSize: 10, color: 'var(--text-dim)', background: 'transparent', border: '1px solid var(--glass-border)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Play size={10} /> Play All
+                  </button>
+                )}
+                {downloadHistory.length > 0 && (
+                  <button onClick={() => { clearDownloadHistory(); addToast('Download history cleared', 'info'); }}
+                    style={{ padding: '4px 10px', borderRadius: 16, fontSize: 10, color: 'var(--text-dim)', background: 'transparent', border: '1px solid var(--glass-border)', cursor: 'pointer' }}>
+                    <Trash2 size={10} />
+                  </button>
+                )}
+              </div>
             </div>
 
             {downloadHistory.length === 0 ? (
@@ -177,6 +193,11 @@ export default function HistoryView() {
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     onDoubleClick={() => handlePlay(dl)}
+                    onContextMenu={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      useUIStore.getState().openContextMenu({ x: e.clientX, y: e.clientY, track: { ...dl, name: dl.title } });
+                    }}
                   >
                     <div style={{ width: 36, height: 36, borderRadius: 8, background: 'linear-gradient(135deg, rgba(167,139,250,0.15), rgba(99,102,241,0.1))', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <Download size={14} color="var(--accent)" />
@@ -234,6 +255,19 @@ export default function HistoryView() {
                   }}
                 >{f.label}</button>
               ))}
+              {filtered.length > 0 && (
+                <button onClick={() => {
+                  if (filtered.length === 0) return;
+                  const store = usePlayerStore.getState();
+                  const first = filtered[0];
+                  const rest = filtered.slice(1).map(s => ({ ...s, name: s.name }));
+                  store.setQueue(rest);
+                  store.setPlaybackContext({ type: 'playlist', playlistId: 'history' });
+                  handlePlay(first);
+                }}
+                  style={{ padding: '6px 14px', borderRadius: 20, fontSize: 11, color: 'var(--text-dim)', background: 'transparent', border: '1px solid var(--glass-border)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}
+                ><Play size={11} /> Play All</button>
+              )}
               {playHistory.length > 0 && (
                 <button onClick={() => { clearPlayHistory(); addToast('History cleared', 'info'); }}
                   style={{ padding: '6px 10px', borderRadius: 20, fontSize: 11, color: 'var(--text-dim)', background: 'transparent', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
@@ -311,6 +345,11 @@ export default function HistoryView() {
                         onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)'; const b = e.currentTarget.querySelector('.h-btns'); if (b) b.style.opacity = '1'; }}
                         onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; const b = e.currentTarget.querySelector('.h-btns'); if (b) b.style.opacity = '0'; }}
                         onDoubleClick={() => handlePlay(item)}
+                        onContextMenu={e => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          useUIStore.getState().openContextMenu({ x: e.clientX, y: e.clientY, track: item });
+                        }}
                       >
                         <ArtThumb path={item.path} seed={item.name} size={36} />
                         <div style={{ flex: 1, minWidth: 0 }}>

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLibraryStore } from '../../stores/libraryStore';
 import { usePlayerStore } from '../../stores/playerStore';
@@ -9,10 +9,21 @@ import { ListMusic, Plus, Play, Trash2, Music, GripVertical, ArrowLeft, MoreHori
 export default function PlaylistsView() {
   const { playlists, songs, addPlaylist, removePlaylist, removeFromPlaylist, saveToDisk } = useLibraryStore();
   const { addToast } = useUIStore();
+  const ytPlaylists = usePlayerStore(s => s.ytPlaylists);
+  const ytBrowser = usePlayerStore(s => s.ytBrowser);
+  const loadYtPlaylists = usePlayerStore(s => s.loadYtPlaylists);
   const [selectedPlaylist, setSelectedPlaylist] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
+  const [ytLoading, setYtLoading] = useState(false);
   const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (ytBrowser?.connected && ytPlaylists.length === 0 && !ytLoading) {
+      setYtLoading(true);
+      loadYtPlaylists().finally(() => setYtLoading(false));
+    }
+  }, [ytBrowser?.connected]);
 
   const handleCreate = () => {
     const name = newName.trim();
@@ -227,6 +238,49 @@ export default function PlaylistsView() {
                 </motion.div>
               );
             })}
+          </div>
+        )}
+
+        {/* YouTube Playlists */}
+        {ytLoading && (
+          <div style={{ textAlign: 'center', padding: '30px 20px', color: 'var(--text-dim)' }}>
+            <p style={{ fontSize: 13 }}>Loading YouTube playlists...</p>
+          </div>
+        )}
+        {ytPlaylists.length > 0 && (
+          <div style={{ marginTop: 40 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', margin: 0 }}>YouTube Playlists</h3>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{ytPlaylists.length} playlists</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 16 }}>
+              {ytPlaylists.map(pl => (
+                <motion.div key={pl.id} whileHover={{ y: -4, scale: 1.02 }} transition={{ type: 'spring', damping: 20 }}
+                  onClick={() => {
+                    useUIStore.getState().setActiveView('stream');
+                  }}
+                  style={{
+                    background: 'var(--bg-surface)', borderRadius: 14, overflow: 'hidden', cursor: 'pointer',
+                    border: '1px solid var(--glass-border)', transition: 'box-shadow 0.2s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.3)'}
+                  onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+                >
+                  <div style={{ height: 130, position: 'relative', background: '#111' }}>
+                    {pl.thumbnail ? (
+                      <img src={pl.thumbnail} alt={pl.title} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.8 }} />
+                    ) : (
+                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ListMusic size={32} color="rgba(255,255,255,0.2)" /></div>
+                    )}
+                    <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)' }} />
+                  </div>
+                  <div style={{ padding: '12px 14px' }}>
+                    <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pl.title}</p>
+                    <p style={{ margin: '3px 0 0', fontSize: 11, color: 'var(--text-dim)' }}>{pl.count} track{pl.count !== 1 ? 's' : ''}</p>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
           </div>
         )}
       </motion.div>

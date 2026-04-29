@@ -1,10 +1,12 @@
-import { app, BrowserWindow, ipcMain, shell, dialog, session, Tray, Menu, globalShortcut, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, session, Tray, Menu, globalShortcut, nativeImage, net } from 'electron';
+import { spawn } from 'child_process';
 import youtubedl from 'youtube-dl-exec';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import * as mm from 'music-metadata';
 import DiscordRPC from 'discord-rpc';
+import { setupYtCookieHandlers } from './ytCookieAuth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -121,6 +123,47 @@ ipcMain.handle('load-library', () => {
     return data;
 });
 
+function extractIntelligentMetadata(fileName, currentArtist, currentTitle) {
+    if (!fileName) return { artist: currentArtist, title: currentTitle };
+    
+    // 1. Remove extensions
+    let clean = fileName.replace(/\.(mp3|wav|m4a|flac|ogg|aac)$/i, '');
+    
+    // 2. Remove common fluff (YouTube suffixes, HQ, Official Video, Lyrics, etc.)
+    const fluffRegex = /\[?(official\s+(audio|video|visualizer|lyric|lyrics))\]?|\(?(official\s+(audio|video|visualizer|lyric|lyrics))\)?|\[?(lyric|lyrics|hq|hd|audio|video)\]?|\(?(lyric|lyrics|hq|hd|audio|video)\)?|\[free download\]|\(free download\)/gi;
+    clean = clean.replace(fluffRegex, '');
+    
+    // Clean up excessive spaces and brackets left behind
+    clean = clean.replace(/\s+/g, ' ').replace(/\(\s*\)/g, '').replace(/\[\s*\]/g, '').trim();
+
+    // 3. Split by delimiter
+    const delimiters = [' - ', ' – ', ' — ', ' ~ '];
+    let delimiterFound = null;
+    for (const d of delimiters) {
+        if (clean.includes(d)) {
+            delimiterFound = d;
+            break;
+        }
+    }
+
+    let artist = currentArtist;
+    let title = currentTitle;
+
+    if (delimiterFound) {
+        const parts = clean.split(delimiterFound);
+        artist = parts[0].trim();
+        title = parts.slice(1).join(delimiterFound).trim();
+    } else if (clean && (!currentArtist || currentArtist === 'Unknown Artist')) {
+        // If no delimiter but we don't know the artist, at least use the clean name for title
+        title = clean;
+    }
+
+    return { 
+        artist: artist || 'Unknown Artist', 
+        title: title || currentTitle || fileName 
+    };
+}
+
 ipcMain.handle('add-to-library', async (event, item) => {
     let data = { songs: [], playlists: [] };
     if (fs.existsSync(libraryPath)) {
@@ -134,13 +177,28 @@ ipcMain.handle('add-to-library', async (event, item) => {
     if (!item.artist && !item.album && item.path && fs.existsSync(item.path) && item.type !== 'video') {
         try {
             const metadata = await mm.parseFile(item.path);
-            item.artist = metadata.common.artist || metadata.common.albumartist || 'Unknown Artist';
+            let extractedArtist = metadata.common.artist || metadata.common.albumartist;
+            let extractedTitle = metadata.common.title;
+            
+            if (!extractedArtist || extractedArtist === 'Unknown Artist') {
+                const intelligent = extractIntelligentMetadata(path.basename(item.path), extractedArtist, extractedTitle || item.name);
+                extractedArtist = intelligent.artist;
+                extractedTitle = intelligent.title;
+            }
+
+            item.artist = extractedArtist || 'Unknown Artist';
             item.album = metadata.common.album || 'Unknown Album';
-            item.name = metadata.common.title || item.name;
+            item.name = extractedTitle || item.name;
         } catch (e) { }
     } else {
-        item.artist = item.artist || 'Unknown Artist';
-        item.album = item.album || 'Unknown Album';
+        if (!item.artist || item.artist === 'Unknown Artist') {
+            const intelligent = extractIntelligentMetadata(item.name || path.basename(item.path || ''), item.artist, item.name);
+            item.artist = intelligent.artist;
+            item.name = intelligent.title;
+        } else {
+            item.artist = item.artist || 'Unknown Artist';
+            item.album = item.album || 'Unknown Album';
+        }
     }
 
     if (!data.songs.find(i => i.id === item.id)) {
@@ -165,6 +223,33 @@ ipcMain.handle('remove-from-library', (event, id) => {
         p.itemIds = p.itemIds.filter(itemId => itemId !== id);
     });
     fs.writeFileSync(libraryPath, JSON.stringify(data, null, 2), 'utf8');
+    return data;
+});
+
+ipcMain.handle('enrich-library-metadata', () => {
+    let data = { songs: [], playlists: [] };
+    if (!fs.existsSync(libraryPath)) return data;
+    try {
+        const parsed = JSON.parse(fs.readFileSync(libraryPath, 'utf8'));
+        if (Array.isArray(parsed)) data.songs = parsed;
+        else data = parsed;
+    } catch (e) { return data; }
+
+    let modified = false;
+    data.songs.forEach(item => {
+        if (!item.artist || item.artist === 'Unknown Artist') {
+            const intelligent = extractIntelligentMetadata(item.name || path.basename(item.path || ''), item.artist, item.name);
+            if (intelligent.artist !== item.artist || intelligent.title !== item.name) {
+                item.artist = intelligent.artist;
+                item.name = intelligent.title;
+                modified = true;
+            }
+        }
+    });
+
+    if (modified) {
+        fs.writeFileSync(libraryPath, JSON.stringify(data, null, 2), 'utf8');
+    }
     return data;
 });
 
@@ -477,6 +562,246 @@ ipcMain.handle('select-folder', async () => {
     await walkSync(selectedPath);
     return filesFound;
 });
+
+// ── YouTube Streaming ──
+let activeStreamProcs = null; // { ytdlp, ffmpeg }
+
+// Resolve yt-dlp binary from youtube-dl-exec
+function getYtDlpPath() {
+    // Direct path from project root
+    const direct = path.join(__dirname, '..', 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp.exe');
+    if (fs.existsSync(direct)) return direct;
+    // Also check sibling to electron dir
+    const alt = path.join(__dirname, 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp.exe');
+    if (fs.existsSync(alt)) return alt;
+    return 'yt-dlp'; // fallback to PATH
+}
+
+ipcMain.handle('yt-search', async (event, query) => {
+    try {
+        // Use YouTube InnerTube API directly — fast, reliable, no yt-dlp overhead
+        const response = await net.fetch('https://www.youtube.com/youtubei/v1/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: query,
+                context: {
+                    client: {
+                        clientName: 'WEB',
+                        clientVersion: '2.20240101.00.00',
+                        hl: 'en',
+                        gl: 'US',
+                    }
+                },
+                params: 'EgIQAQ%3D%3D', // Filter: Videos only
+            }),
+        });
+        const data = await response.json();
+
+        // Parse InnerTube response — videos are nested in section list renderers
+        const results = [];
+        const contents = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents
+            ?.sectionListRenderer?.contents || [];
+        for (const section of contents) {
+            const items = section?.itemSectionRenderer?.contents || [];
+            for (const item of items) {
+                const v = item?.videoRenderer;
+                if (!v || !v.videoId) continue;
+                // Parse duration text like "3:45" → seconds
+                const durText = v.lengthText?.simpleText || '';
+                const durParts = durText.split(':').map(Number);
+                let duration = 0;
+                if (durParts.length === 3) duration = durParts[0] * 3600 + durParts[1] * 60 + durParts[2];
+                else if (durParts.length === 2) duration = durParts[0] * 60 + durParts[1];
+                else if (durParts.length === 1) duration = durParts[0];
+
+                results.push({
+                    id: v.videoId,
+                    title: v.title?.runs?.map(r => r.text).join('') || 'Unknown',
+                    channel: v.ownerText?.runs?.map(r => r.text).join('') || v.shortBylineText?.runs?.map(r => r.text).join('') || 'Unknown',
+                    duration,
+                    thumbnail: v.thumbnail?.thumbnails?.slice(-1)?.[0]?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+                    url: `https://www.youtube.com/watch?v=${v.videoId}`,
+                });
+            }
+        }
+        console.log(`[YT Search] "${query}" → ${results.length} results (InnerTube)`);
+        return results;
+    } catch (e) {
+        console.error('[YT Search] InnerTube failed:', e.message);
+        // Fallback to yt-dlp if InnerTube fails
+        try {
+            const results = await youtubedl(`ytsearch10:${query}`, {
+                dumpSingleJson: true,
+                noCheckCertificates: true,
+                noWarnings: true,
+                skipDownload: true,
+                ignoreErrors: true,
+            });
+            const entries = Array.isArray(results) ? results :
+                            results?.entries ? results.entries : [results];
+            return entries.filter(Boolean).map(e => ({
+                id: e.id || e.url,
+                title: e.title || 'Unknown',
+                channel: e.channel || e.uploader || 'Unknown',
+                duration: e.duration || 0,
+                thumbnail: e.thumbnail || `https://i.ytimg.com/vi/${e.id}/hqdefault.jpg`,
+                url: e.webpage_url || e.url || `https://www.youtube.com/watch?v=${e.id}`,
+            }));
+        } catch (e2) {
+            console.error('[YT Search] Fallback also failed:', e2.message);
+            return [];
+        }
+    }
+});
+
+ipcMain.handle('yt-get-info', async (event, url) => {
+    try {
+        const info = await youtubedl(url, {
+            dumpJson: true,
+            noPlaylist: true,
+            noCheckCertificates: true,
+            noWarnings: true,
+            skipDownload: true,
+        });
+        return {
+            id: info.id,
+            title: info.title || 'Unknown',
+            channel: info.channel || info.uploader || 'Unknown',
+            duration: info.duration || 0,
+            thumbnail: info.thumbnail || `https://i.ytimg.com/vi/${info.id}/hqdefault.jpg`,
+            url: info.webpage_url || url,
+        };
+    } catch (e) {
+        console.error('[YT Info]', e.message);
+        throw new Error('Failed to fetch video info');
+    }
+});
+
+ipcMain.handle('yt-stream-start', async (event, url) => {
+    // Kill any existing stream
+    if (activeStreamProcs) {
+        try { activeStreamProcs.ytdlp?.kill('SIGKILL'); } catch {}
+        try { activeStreamProcs.ffmpeg?.kill('SIGKILL'); } catch {}
+        activeStreamProcs = null;
+    }
+
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) throw new Error('No window');
+
+    const ytdlpBin = getYtDlpPath();
+    const ffmpegBin = ffmpegDir ? path.join(ffmpegDir, 'ffmpeg.exe') : 'ffmpeg';
+    const cookiesFile = path.join(app.getPath('userData'), 'yt-cookies.txt');
+    const cookieArgs = fs.existsSync(cookiesFile) ? ['--cookies', cookiesFile] : [];
+
+    console.log('[Stream] Starting:', url);
+    console.log('[Stream] yt-dlp:', ytdlpBin);
+    console.log('[Stream] ffmpeg:', ffmpegBin);
+
+    return new Promise((resolve, reject) => {
+        // Spawn yt-dlp to output audio to stdout
+        const ytdlp = spawn(ytdlpBin, [
+            '-f', 'bestaudio',
+            '-o', '-',
+            '--no-playlist',
+            '--no-check-certificates',
+            '--no-warnings',
+            ...cookieArgs,
+            url,
+        ]);
+
+        // Spawn ffmpeg to decode to raw PCM
+        const ffmpeg = spawn(ffmpegBin, [
+            '-i', 'pipe:0',
+            '-f', 's16le',
+            '-ar', '44100',
+            '-ac', '2',
+            '-loglevel', 'error',
+            'pipe:1',
+        ]);
+
+        activeStreamProcs = { ytdlp, ffmpeg };
+
+        // Pipe yt-dlp stdout → ffmpeg stdin
+        ytdlp.stdout.pipe(ffmpeg.stdin);
+
+        let resolved = false;
+        let totalBytes = 0;
+
+        ffmpeg.stdout.on('data', (chunk) => {
+            totalBytes += chunk.length;
+            if (!resolved) {
+                resolved = true;
+                resolve({ ok: true });
+            }
+            // Send PCM chunk to renderer (as Uint8Array for IPC efficiency)
+            try {
+                if (win && !win.isDestroyed()) {
+                    win.webContents.send('stream-chunk', new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+                }
+            } catch {}
+        });
+
+        ffmpeg.on('close', (code) => {
+            console.log(`[Stream] FFmpeg closed (code ${code}), total ${(totalBytes / 1024 / 1024).toFixed(1)} MB PCM`);
+            activeStreamProcs = null;
+            try {
+                if (win && !win.isDestroyed()) {
+                    win.webContents.send('stream-end');
+                }
+            } catch {}
+            if (!resolved) {
+                resolved = true;
+                reject(new Error('Stream failed to produce audio'));
+            }
+        });
+
+        ytdlp.on('error', (err) => {
+            console.error('[Stream] yt-dlp error:', err.message);
+            if (!resolved) { resolved = true; reject(err); }
+        });
+
+        ffmpeg.on('error', (err) => {
+            console.error('[Stream] ffmpeg error:', err.message);
+            if (!resolved) { resolved = true; reject(err); }
+        });
+
+        ytdlp.stderr.on('data', (d) => {
+            const msg = d.toString().trim();
+            if (msg) console.log('[Stream] yt-dlp:', msg);
+        });
+
+        ffmpeg.stderr.on('data', (d) => {
+            const msg = d.toString().trim();
+            if (msg) console.error('[Stream] ffmpeg:', msg);
+        });
+
+        // Timeout: if no data in 30s, fail
+        setTimeout(() => {
+            if (!resolved) {
+                resolved = true;
+                try { ytdlp.kill('SIGKILL'); } catch {}
+                try { ffmpeg.kill('SIGKILL'); } catch {}
+                activeStreamProcs = null;
+                reject(new Error('Stream timeout — no audio data received'));
+            }
+        }, 30000);
+    });
+});
+
+ipcMain.handle('yt-stream-stop', async () => {
+    if (activeStreamProcs) {
+        try { activeStreamProcs.ytdlp?.kill('SIGKILL'); } catch {}
+        try { activeStreamProcs.ffmpeg?.kill('SIGKILL'); } catch {}
+        activeStreamProcs = null;
+        console.log('[Stream] Stopped by user');
+    }
+});
+
+// ═══ YouTube Browser Cookie Integration (no API keys) ═══
+const activeStreamProcsRef = { current: activeStreamProcs };
+setupYtCookieHandlers(app, youtubedl, { getYtDlpPath, ffmpegDir, activeStreamProcsRef });
+
 
 ipcMain.on('window-control', (event, action) => {
     const win = BrowserWindow.fromWebContents(event.sender);

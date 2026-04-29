@@ -1,5 +1,6 @@
 import { usePlayerStore } from '../stores/playerStore.js';
 import { useLibraryStore } from '../stores/libraryStore.js';
+import { useUIStore } from '../stores/uiStore.js';
 import { generateImpulseResponse, addVinylNoise } from './audioEngine.js';
 
 class PlaybackEngine {
@@ -164,9 +165,9 @@ class PlaybackEngine {
       usePlayerStore.getState().setCurrentTime(0);
       
       const s = usePlayerStore.getState();
-      if (s.isRepeat) {
+      if (s.repeatMode === 2) {
         this.play();
-      } else if (s.queue.length > 0 || s.isShuffle || s.autoPlay) {
+      } else if (s.queue.length > 0 || s.isShuffle || s.autoPlay || s.repeatMode === 1) {
         this.playNext();
       }
     };
@@ -196,6 +197,148 @@ class PlaybackEngine {
     } else {
       usePlayerStore.getState().setCurrentTime(time);
     }
+  }
+
+  // ── YouTube Streaming ──
+  async startStream(trackInfo) {
+    const store = usePlayerStore.getState();
+    store.setIsProcessing(true);
+    store.setLoadingText('Connecting to stream...');
+    store.setIsStreaming(true);
+    store.setStreamTrack(trackInfo);
+    store.setFileName(trackInfo.title);
+    store.setTrack({
+      id: trackInfo.url,
+      name: trackInfo.title,
+      artist: trackInfo.channel,
+      album: 'YouTube Stream',
+      path: trackInfo.url,
+      type: 'stream',
+    });
+    // Set album art to stream thumbnail for NowPlayingBar
+    if (trackInfo.thumbnail) {
+      store.setAlbumArt(trackInfo.thumbnail);
+    }
+
+    this.stop();
+    this.pauseOffset = 0;
+
+    // Accumulate PCM chunks
+    const chunks = [];
+    let totalSamples = 0;
+    const SAMPLE_RATE = 44100;
+    const CHANNELS = 2;
+    const BYTES_PER_SAMPLE = 2; // s16le
+    const PLAYBACK_THRESHOLD = SAMPLE_RATE * CHANNELS * 2; // ~2 seconds of samples
+    let started = false;
+    let streamEnded = false;
+    let rebuildScheduled = false;
+
+    const api = window.electronAPI;
+    if (!api) { store.setIsProcessing(false); return; }
+
+    // Clean up previous listeners
+    api.removeStreamListeners();
+
+    const buildAudioBuffer = () => {
+      // Merge all chunks into one Float32Array per channel
+      const totalFrames = Math.floor(totalSamples / CHANNELS);
+      const ctx = this.ensureCtx();
+      const buf = ctx.createBuffer(CHANNELS, totalFrames, SAMPLE_RATE);
+      const left = buf.getChannelData(0);
+      const right = buf.getChannelData(1);
+
+      let writePos = 0;
+      for (const chunk of chunks) {
+        const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+        const framesToRead = Math.floor(chunk.byteLength / (CHANNELS * BYTES_PER_SAMPLE));
+        for (let i = 0; i < framesToRead && writePos < totalFrames; i++) {
+          const offset = i * CHANNELS * BYTES_PER_SAMPLE;
+          left[writePos] = view.getInt16(offset, true) / 32768;
+          right[writePos] = view.getInt16(offset + BYTES_PER_SAMPLE, true) / 32768;
+          writePos++;
+        }
+      }
+      return buf;
+    };
+
+    api.onStreamChunk((chunk) => {
+      const u8 = new Uint8Array(chunk);
+      chunks.push(u8);
+      totalSamples += u8.byteLength / BYTES_PER_SAMPLE;
+
+      if (!started && totalSamples >= PLAYBACK_THRESHOLD) {
+        started = true;
+        store.setIsProcessing(false);
+        store.setLoadingText('');
+        // Build initial buffer and play
+        const audioBuffer = buildAudioBuffer();
+        store.setAudioBuffer(audioBuffer);
+        this.play();
+      }
+
+      // Rebuild buffer periodically (every ~5 seconds of new audio)
+      if (started && !rebuildScheduled) {
+        rebuildScheduled = true;
+        setTimeout(() => {
+          rebuildScheduled = false;
+          if (totalSamples > 0 && chunks.length > 0) {
+            const currentTime = this.pauseOffset || (this.ctx?.currentTime - this.startTime) || 0;
+            const audioBuffer = buildAudioBuffer();
+            store.setAudioBuffer(audioBuffer);
+            // Restart playback from the current position with the bigger buffer
+            if (store.getState?.().isPlaying || usePlayerStore.getState().isPlaying) {
+              this.stop();
+              this.pauseOffset = currentTime;
+              this.play();
+            }
+          }
+        }, 3000);
+      }
+    });
+
+    api.onStreamEnd(() => {
+      streamEnded = true;
+      if (totalSamples > 0 && chunks.length > 0) {
+        // Build the final full buffer
+        const currentTime = this.pauseOffset || (this.ctx?.currentTime - this.startTime) || 0;
+        const audioBuffer = buildAudioBuffer();
+        store.setAudioBuffer(audioBuffer);
+        if (!started) {
+          started = true;
+          store.setIsProcessing(false);
+          store.setLoadingText('');
+          this.play();
+        } else if (usePlayerStore.getState().isPlaying) {
+          // Restart from current position with the complete buffer
+          this.stop();
+          this.pauseOffset = currentTime;
+          this.play();
+        }
+      }
+      store.setIsStreaming(false);
+      api.removeStreamListeners();
+    });
+
+    try {
+      await api.ytStreamStart(trackInfo.url);
+    } catch (e) {
+      store.setIsProcessing(false);
+      store.setLoadingText('');
+      store.setIsStreaming(false);
+      useUIStore?.getState?.()?.addToast?.(`Stream failed: ${e.message}`, 'error');
+      api.removeStreamListeners();
+    }
+  }
+
+  async stopStream() {
+    if (window.electronAPI) {
+      await window.electronAPI.ytStreamStop();
+      window.electronAPI.removeStreamListeners();
+    }
+    this.stop();
+    usePlayerStore.getState().setIsStreaming(false);
+    usePlayerStore.getState().setStreamTrack(null);
   }
 
   async loadFileAndPlay(file, trackMeta = null) {

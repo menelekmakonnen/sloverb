@@ -270,7 +270,12 @@ export default function StudioView() {
             </p>
 
             {/* Play + Seek */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button onClick={() => audioBuffer && playbackEngine.seek(Math.max(0, currentTime - 5))} disabled={!audioBuffer} title="-5s" style={{
+                width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700,
+                background: 'var(--bg-elevated)', color: audioBuffer ? 'var(--text-secondary)' : 'var(--text-dim)', cursor: audioBuffer ? 'pointer' : 'default', border: '1px solid var(--glass-border)', transition: 'all 0.2s',
+              }}>-5</button>
+
               <button onClick={() => playbackEngine.togglePlay()} disabled={!audioBuffer} style={{
                 width: 40, height: 40, borderRadius: '50%',
                 background: audioBuffer ? 'var(--accent)' : 'var(--bg-elevated)',
@@ -281,6 +286,12 @@ export default function StudioView() {
               }}>
                 {isPlaying ? <Pause size={16} /> : <Play size={16} style={{ marginLeft: 2 }} />}
               </button>
+
+              <button onClick={() => audioBuffer && playbackEngine.seek(Math.min(audioBuffer.duration, currentTime + 5))} disabled={!audioBuffer} title="+5s" style={{
+                width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700,
+                background: 'var(--bg-elevated)', color: audioBuffer ? 'var(--text-secondary)' : 'var(--text-dim)', cursor: audioBuffer ? 'pointer' : 'default', border: '1px solid var(--glass-border)', transition: 'all 0.2s',
+              }}>+5</button>
+
               <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-dim)', width: 36, textAlign: 'right' }}>{formatTime(currentTime)}</span>
               <div style={{ flex: 1, position: 'relative', height: 6, background: 'var(--glass-border)', borderRadius: 3, cursor: audioBuffer ? 'pointer' : 'default' }}
                 onClick={e => { if (!audioBuffer) return; const rect = e.currentTarget.getBoundingClientRect(); const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)); playbackEngine.seek(pct * audioBuffer.duration); }}>

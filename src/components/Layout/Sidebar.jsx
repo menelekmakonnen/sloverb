@@ -3,7 +3,7 @@ import { useUIStore } from '../../stores/uiStore';
 import { Sun, Moon, Rocket } from 'lucide-react';
 import {
   HomeIcon, StudioIcon, LibraryIcon, PlaylistIcon, ArtistsIcon,
-  AlbumsIcon, FoldersIcon, HistoryIcon, SettingsIcon
+  AlbumsIcon, FoldersIcon, HistoryIcon, SettingsIcon, StreamIcon
 } from '../NavIcons';
 import SloverbLogo from '../SloverbLogo';
 
@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { id: 'home', label: 'Home', Icon: HomeIcon },
   { id: 'studio', label: 'Studio', Icon: StudioIcon },
   { id: 'library', label: 'Library', Icon: LibraryIcon },
+  { id: 'stream', label: 'Stream', Icon: StreamIcon },
   { id: 'playlists', label: 'Playlists', Icon: PlaylistIcon },
   { id: 'artists', label: 'Artists', Icon: ArtistsIcon },
   { id: 'albums', label: 'Albums', Icon: AlbumsIcon },

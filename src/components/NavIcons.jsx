@@ -165,3 +165,22 @@ export function SettingsIcon({ size, active }) {
     </Wrap>
   );
 }
+
+// ─── STREAM: Broadcast tower with signal waves ───
+export function StreamIcon({ size, active }) {
+  return (
+    <Wrap size={size} active={active}>
+      {/* Antenna tower */}
+      <path className="icon-stroke" d="M12 20V10" strokeWidth="1.8" strokeLinecap="round" />
+      <path className="icon-stroke" d="M8 20h8" strokeWidth="1.5" strokeLinecap="round" />
+      <path className="icon-stroke" d="M9.5 20L12 12l2.5 8" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+      {/* Signal waves */}
+      <g className="icon-pulse">
+        <path className="icon-stroke" d="M8.5 7.5A5 5 0 0112 6a5 5 0 013.5 1.5" strokeWidth="1.3" strokeLinecap="round" fill="none" />
+        <path className="icon-accent" d="M6 5a8 8 0 016-2 8 8 0 016 2" stroke="var(--accent)" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+      </g>
+      {/* Antenna dot */}
+      <circle className="icon-fill icon-pulse" cx="12" cy="9" r="1.5" />
+    </Wrap>
+  );
+}

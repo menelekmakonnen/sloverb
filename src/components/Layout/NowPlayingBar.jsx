@@ -1,10 +1,10 @@
 import { usePlayerStore } from '../../stores/playerStore';
 import { useUIStore } from '../../stores/uiStore';
 import { playbackEngine } from '../../lib/playbackEngine';
-import { Play, Pause, SkipBack, SkipForward, Repeat, Shuffle, Volume2, Volume1, VolumeX, ListMusic, Radio } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Repeat, Repeat1, Shuffle, Volume2, Volume1, VolumeX, ListMusic, Radio, Rewind, FastForward } from 'lucide-react';
 
 export default function NowPlayingBar() {
-  const { audioBuffer, isPlaying, masterVolume, isRepeat, isShuffle, autoPlay, params, fileName, currentTrack, currentTime, albumArt,
+  const { audioBuffer, isPlaying, masterVolume, repeatMode, isShuffle, autoPlay, params, fileName, currentTrack, currentTime, albumArt,
     setMasterVolume, toggleRepeat, toggleShuffle, toggleAutoPlay } = usePlayerStore();
   const { toggleQueueDrawer, studioDrawerOpen, toggleStudioDrawer, openContextMenu } = useUIStore();
 
@@ -87,18 +87,18 @@ export default function NowPlayingBar() {
           background: 'rgba(12, 14, 25, 0.65)', 
           backdropFilter: 'blur(32px) saturate(150%)',
           borderTop: '1px solid rgba(255,255,255,0.05)',
-          display: 'flex', alignItems: 'center', padding: '0 24px', gap: 20,
+          display: 'flex', alignItems: 'center', padding: '0 20px', gap: 16,
           cursor: 'pointer',
         }}
       >
-        {/* Track Info — fixed width, right-click enabled */}
+        {/* Track Info — left section */}
         <div
           onClick={e => e.stopPropagation()}
           onContextMenu={handleTrackContextMenu}
-          style={{ display: 'flex', alignItems: 'center', gap: 14, flex: '0 0 240px', minWidth: 0, cursor: 'default' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 12, flex: '0 0 220px', minWidth: 0, cursor: 'default' }}
         >
           <div style={{
-            width: 44, height: 44, borderRadius: 10, flexShrink: 0,
+            width: 42, height: 42, borderRadius: 10, flexShrink: 0,
             background: albumArt ? `url(${albumArt}) center/cover` : (audioBuffer ? `linear-gradient(135deg, hsl(${h1},70%,55%), hsl(${h2},60%,35%))` : 'rgba(255,255,255,0.05)'),
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             boxShadow: albumArt ? '0 4px 16px rgba(0,0,0,0.4)' : 'none',
@@ -107,31 +107,41 @@ export default function NowPlayingBar() {
             {!albumArt && <span style={{ fontSize: audioBuffer ? 18 : 14, color: audioBuffer ? '#fff' : 'rgba(255,255,255,0.3)' }}>{audioBuffer ? '🎵' : '—'}</span>}
           </div>
           <div style={{ overflow: 'hidden', minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '0.2px', maxWidth: '100%' }}>{fileName || 'No track'}</div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginTop: 1, letterSpacing: '0.4px', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentTrack?.artist || (audioBuffer ? 'Unknown Artist' : '')}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '0.2px' }}>{fileName || 'No track'}</div>
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentTrack?.artist || (audioBuffer ? 'Unknown Artist' : '')}</div>
           </div>
         </div>
 
-        {/* Center Controls — fixed min-width so they never get pushed off */}
-        <div onClick={e => e.stopPropagation()} style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24, cursor: 'default', minWidth: 280 }}>
-          <button onClick={toggleShuffle} style={{ color: isShuffle ? '#fff' : 'rgba(255,255,255,0.4)', padding: 6, transition: 'all 0.2s', transform: isShuffle ? 'scale(1.1)' : 'scale(1)', textShadow: isShuffle ? '0 0 8px rgba(255,255,255,0.5)' : 'none', flexShrink: 0 }}><Shuffle size={16} /></button>
-          <button style={{ color: 'rgba(255,255,255,0.7)', padding: 6, transition: 'color 0.2s', flexShrink: 0 }} onMouseEnter={e => e.currentTarget.style.color='#fff'} onMouseLeave={e => e.currentTarget.style.color='rgba(255,255,255,0.7)'}><SkipBack size={20} /></button>
-          
-          <button onClick={() => playbackEngine.togglePlay()} style={{ width: 44, height: 44, borderRadius: '50%', background: audioBuffer ? '#fff' : 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: audioBuffer ? '#000' : 'rgba(255,255,255,0.4)', boxShadow: audioBuffer ? '0 0 24px rgba(255,255,255,0.4)' : 'none', transition: 'all 0.2s', transform: 'scale(1)', flexShrink: 0 }} onMouseEnter={e => audioBuffer && (e.currentTarget.style.transform = 'scale(1.05)')} onMouseLeave={e => audioBuffer && (e.currentTarget.style.transform = 'scale(1)')}>
-            {isPlaying ? <Pause size={18} /> : <Play size={18} style={{ marginLeft: 3 }} />}
-          </button>
+        {/* Center — transport controls + time */}
+        <div onClick={e => e.stopPropagation()} style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, cursor: 'default' }}>
+          {/* Transport row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <button onClick={toggleShuffle} style={{ color: isShuffle ? '#fff' : 'rgba(255,255,255,0.35)', padding: 4, transition: 'all 0.2s' }}><Shuffle size={14} /></button>
+            <button onClick={() => playbackEngine.playPrev && playbackEngine.playPrev()} style={{ color: 'rgba(255,255,255,0.6)', padding: 4 }}><SkipBack size={16} /></button>
+            <button onClick={() => audioBuffer && playbackEngine.seek(Math.max(0, currentTime - 5))} title="Back 5s" style={{ color: 'rgba(255,255,255,0.5)', padding: 4, transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color='#fff'} onMouseLeave={e => e.currentTarget.style.color='rgba(255,255,255,0.5)'}><Rewind size={14} /></button>
 
-          <button onClick={() => playbackEngine.playNext()} style={{ color: 'rgba(255,255,255,0.7)', padding: 6, transition: 'color 0.2s', flexShrink: 0 }} onMouseEnter={e => e.currentTarget.style.color='#fff'} onMouseLeave={e => e.currentTarget.style.color='rgba(255,255,255,0.7)'}><SkipForward size={20} /></button>
-          <button onClick={toggleRepeat} style={{ color: isRepeat ? '#fff' : 'rgba(255,255,255,0.4)', padding: 6, transition: 'all 0.2s', transform: isRepeat ? 'scale(1.1)' : 'scale(1)', textShadow: isRepeat ? '0 0 8px rgba(255,255,255,0.5)' : 'none', flexShrink: 0 }}><Repeat size={16} /></button>
-          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginLeft: 16, fontWeight: 500, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmt(currentTime)} <span style={{opacity:0.5}}>/</span> {fmt(duration)}</span>
+            <button onClick={() => playbackEngine.togglePlay()} style={{ width: 38, height: 38, borderRadius: '50%', background: audioBuffer ? '#fff' : 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: audioBuffer ? '#000' : 'rgba(255,255,255,0.3)', boxShadow: audioBuffer ? '0 0 20px rgba(255,255,255,0.35)' : 'none', transition: 'all 0.2s', flexShrink: 0 }}>
+              {isPlaying ? <Pause size={16} /> : <Play size={16} style={{ marginLeft: 2 }} />}
+            </button>
+
+            <button onClick={() => audioBuffer && playbackEngine.seek(Math.min(duration, currentTime + 5))} title="Forward 5s" style={{ color: 'rgba(255,255,255,0.5)', padding: 4, transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color='#fff'} onMouseLeave={e => e.currentTarget.style.color='rgba(255,255,255,0.5)'}><FastForward size={14} /></button>
+            <button onClick={() => playbackEngine.playNext()} style={{ color: 'rgba(255,255,255,0.6)', padding: 4 }}><SkipForward size={16} /></button>
+            <button onClick={toggleRepeat} style={{ color: repeatMode > 0 ? '#fff' : 'rgba(255,255,255,0.35)', padding: 4, transition: 'all 0.2s' }}>
+              {repeatMode === 2 ? <Repeat1 size={14} /> : <Repeat size={14} />}
+            </button>
+          </div>
+          {/* Time display */}
+          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontWeight: 500, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', letterSpacing: '0.5px' }}>
+            {fmt(currentTime)} <span style={{ opacity: 0.4 }}>/</span> {fmt(duration)}
+          </span>
         </div>
 
-        {/* Volume + Queue — fixed width */}
-        <div onClick={e => e.stopPropagation()} style={{ flex: '0 0 200px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, cursor: 'default' }}>
-          <button onClick={toggleAutoPlay} title={autoPlay ? 'Autoplay On' : 'Autoplay Off'} style={{ color: autoPlay ? '#fff' : 'rgba(255,255,255,0.4)', padding: 4, transition: 'color 0.2s' }}><Radio size={16} /></button>
-          <button onClick={toggleQueueDrawer} style={{ color: 'rgba(255,255,255,0.6)', padding: 4, transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color='#fff'} onMouseLeave={e => e.currentTarget.style.color='rgba(255,255,255,0.6)'}><ListMusic size={18} /></button>
-          <button onClick={() => setMasterVolume(masterVolume === 0 ? 0.9 : 0)} style={{ color: masterVolume === 0 ? 'rgba(255,100,100,0.8)' : 'rgba(255,255,255,0.6)', padding: 2 }}><VolumeIcon size={18} /></button>
-          <input type="range" min={0} max={4} step={0.01} value={masterVolume} onChange={e => setMasterVolume(parseFloat(e.target.value))} style={{ width: 80, accentColor: '#fff' }} />
+        {/* Right — volume + extras */}
+        <div onClick={e => e.stopPropagation()} style={{ flex: '0 0 180px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, cursor: 'default' }}>
+          <button onClick={toggleAutoPlay} title={autoPlay ? 'Autoplay On' : 'Autoplay Off'} style={{ color: autoPlay ? '#fff' : 'rgba(255,255,255,0.35)', padding: 4, transition: 'color 0.2s' }}><Radio size={14} /></button>
+          <button onClick={toggleQueueDrawer} style={{ color: 'rgba(255,255,255,0.5)', padding: 4, transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color='#fff'} onMouseLeave={e => e.currentTarget.style.color='rgba(255,255,255,0.5)'}><ListMusic size={16} /></button>
+          <button onClick={() => setMasterVolume(masterVolume === 0 ? 0.9 : 0)} style={{ color: masterVolume === 0 ? 'rgba(255,100,100,0.8)' : 'rgba(255,255,255,0.5)', padding: 2 }}><VolumeIcon size={16} /></button>
+          <input type="range" min={0} max={4} step={0.01} value={masterVolume} onChange={e => setMasterVolume(parseFloat(e.target.value))} style={{ width: 70, accentColor: '#fff' }} />
         </div>
       </div>
 

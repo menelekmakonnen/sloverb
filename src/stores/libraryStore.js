@@ -211,6 +211,19 @@ export const useLibraryStore = create((set, get) => ({
     }
   },
 
+  enrichMetadata: async () => {
+    if (!window.electronAPI) return;
+    try {
+      const libData = await window.electronAPI.enrichLibraryMetadata();
+      set({
+        songs: libData?.songs || [],
+        playlists: libData?.playlists || [],
+      });
+    } catch (e) {
+      console.error('Failed to enrich metadata:', e);
+    }
+  },
+
   saveToDisk: async () => {
     const { songs, playlists } = get();
     if (window.electronAPI) {

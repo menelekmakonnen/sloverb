@@ -326,8 +326,56 @@ export default function ContextMenu() {
             <MenuItem icon={FolderOpen} label="Show in folder" onClick={() => handleGroupAction('show_folder')} />
             <MenuItem icon={Share2} label="Share" onClick={() => handleGroupAction('share')} />
           </>
+        ) : track.type === 'stream' ? (
+          /* ═══ STREAM TRACK MENU ═══ */
+          <>
+            <MenuItem icon={Play} label="Stream only" onClick={() => {
+              usePlayerStore.getState().addToStreamHistory(track);
+              playbackEngine.startStream(track);
+              closeContextMenu();
+            }} />
+            <MenuItem icon={Download} label="Send to Studio (Download)" onClick={() => {
+              usePlayerStore.getState().setYoutubeUrl(track.url);
+              setActiveView('studio');
+              closeContextMenu();
+              addToast('Sent to Studio for download', 'success');
+            }} />
+            <MenuItem icon={Radio} label="Stream + Local (Send & Play)" onClick={() => {
+              usePlayerStore.getState().addToStreamHistory(track);
+              playbackEngine.startStream(track);
+              usePlayerStore.getState().setYoutubeUrl(track.url);
+              setActiveView('studio');
+              closeContextMenu();
+              addToast('Streaming and sent to Studio', 'success');
+            }} />
+
+            <Divider />
+
+            <MenuItem icon={FastForward} label="Play next" onClick={() => {
+              const store = usePlayerStore.getState();
+              store.setQueue([track, ...store.queue]);
+              addToast(`Will play next: ${track.title || track.name}`, 'info');
+              closeContextMenu();
+            }} />
+            <MenuItem icon={ListPlus} label="Add to queue" onClick={() => {
+              const store = usePlayerStore.getState();
+              store.setQueue([...store.queue, track]);
+              addToast(`Added to queue: ${track.title || track.name}`, 'success');
+              closeContextMenu();
+            }} />
+
+            <Divider />
+
+            <MenuItem icon={Share2} label="Copy Link" onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(track.url);
+                addToast('Link copied to clipboard', 'success');
+              } catch { addToast('Could not copy', 'error'); }
+              closeContextMenu();
+            }} />
+          </>
         ) : (
-          /* ═══ TRACK MENU ═══ */
+          /* ═══ LOCAL TRACK MENU ═══ */
           <>
             <MenuItem icon={Radio} label="Start mix" onClick={() => handleTrackAction('start_mix')} />
             <MenuItem icon={FastForward} label="Play next" onClick={() => handleTrackAction('play_next')} />

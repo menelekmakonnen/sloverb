@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     loadLibrary: () => ipcRenderer.invoke('load-library'),
     addToLibrary: (item) => ipcRenderer.invoke('add-to-library', item),
     removeFromLibrary: (id) => ipcRenderer.invoke('remove-from-library', id),
+    enrichLibraryMetadata: () => ipcRenderer.invoke('enrich-library-metadata'),
     readFile: (p) => ipcRenderer.invoke('read-file', p),
     fetchYoutube: (url) => ipcRenderer.invoke('fetch-youtube', url),
     selectFolder: () => ipcRenderer.invoke('select-folder'),
@@ -24,6 +25,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onMediaNext: (callback) => ipcRenderer.on('media-next', callback),
     onMediaPrevious: (callback) => ipcRenderer.on('media-previous', callback),
     sendThumbbarState: (isPlaying) => ipcRenderer.send('thumbar-playback-state', isPlaying),
+    // YouTube streaming
+    ytSearch: (query) => ipcRenderer.invoke('yt-search', query),
+    ytGetInfo: (url) => ipcRenderer.invoke('yt-get-info', url),
+    ytStreamStart: (url) => ipcRenderer.invoke('yt-stream-start', url),
+    ytStreamStop: () => ipcRenderer.invoke('yt-stream-stop'),
+    onStreamChunk: (cb) => ipcRenderer.on('stream-chunk', (e, chunk) => cb(chunk)),
+    onStreamEnd: (cb) => ipcRenderer.on('stream-end', () => cb()),
+    removeStreamListeners: () => {
+        ipcRenderer.removeAllListeners('stream-chunk');
+        ipcRenderer.removeAllListeners('stream-end');
+    },
+    // YouTube session login (no API keys — signs in via BrowserWindow)
+    ytLogin: () => ipcRenderer.invoke('yt-login'),
+    ytDisconnect: () => ipcRenderer.invoke('yt-disconnect'),
+    ytConnectionStatus: () => ipcRenderer.invoke('yt-connection-status'),
+    ytGetPlaylistItems: (id) => ipcRenderer.invoke('yt-get-playlist-items', id),
+    ytGetLikedVideos: () => ipcRenderer.invoke('yt-get-liked-videos'),
+    ytGetMyPlaylists: () => ipcRenderer.invoke('yt-get-my-playlists'),
+    ytStreamStartAuth: (url) => ipcRenderer.invoke('yt-stream-start-auth', url),
     onOpenFile: (callback) => ipcRenderer.on('open-file', callback),
     removeMediaListeners: () => {
         ipcRenderer.removeAllListeners('media-play-pause');
