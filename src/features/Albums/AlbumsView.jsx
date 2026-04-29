@@ -21,7 +21,7 @@ export default function AlbumsView() {
       if (!map[a]) map[a] = { name: a, artist: s.artist || 'Various Artists', tracks: [] };
       map[a].tracks.push(s);
     });
-    let list = Object.values(map);
+    let list = Object.values(map).filter(a => a.name !== 'Unknown Album');
     if (sortMode === 'count') list.sort((a, b) => b.tracks.length - a.tracks.length);
     else if (sortMode === 'alpha') list.sort((a, b) => a.name.localeCompare(b.name));
     else if (sortMode === 'artist') list.sort((a, b) => a.artist.localeCompare(b.artist));
@@ -162,7 +162,7 @@ export default function AlbumsView() {
                   }}
                   onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 8px 28px rgba(0,0,0,0.35)'; const b = e.currentTarget.querySelector('.alb-btns'); if (b) b.style.opacity = '1'; }}
                   onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; const b = e.currentTarget.querySelector('.alb-btns'); if (b) b.style.opacity = '0'; }}
-                  onContextMenu={(e) => { e.preventDefault(); useUIStore.getState().openContextMenu(e.clientX, e.clientY, album.tracks[0]); }}
+                  onContextMenu={(e) => { e.preventDefault(); useUIStore.getState().openContextMenu(e.clientX, e.clientY, null, { type: 'album', name: album.name, tracks: album.tracks }); }}
                 >
                   <ArtThumb path={album.tracks[0]?.path || album.tracks[0]?.id} seed={album.name} size={160} style={{ height: 140, width: '100%', borderRadius: 0 }} />
                   <div className="alb-btns" style={{ position: 'absolute', top: 100, right: 8, opacity: 0, transition: 'opacity 0.2s', display: 'flex', gap: 4 }}>

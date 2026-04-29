@@ -321,47 +321,62 @@ const WaveformViz = ({ analyser, isPlaying }) => {
   );
 };
 
+const formatTime = (seconds) => {
+  if (!seconds || !isFinite(seconds) || seconds < 0) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+};
+
 const Seeker = ({ audioCtxRef, startTimeRef, pauseOffsetRef, isPlaying, speed, duration, onSeek }) => {
   const [val, setVal] = useState(0);
   const reqRef = useRef();
 
+  // effectiveDuration = how long the song actually takes to play at this speed
+  const effectiveDuration = duration > 0 && speed > 0 ? duration / speed : 0;
+
   useEffect(() => {
     const tick = () => {
       if (isPlaying && audioCtxRef.current) {
-        let elapsed = (audioCtxRef.current.currentTime - startTimeRef.current) * speed;
-        setVal(Math.min(elapsed, duration));
+        // ctx.currentTime - startTime = wall-clock seconds elapsed since playback started
+        // This is already real time — no speed multiplication needed
+        const wallElapsed = audioCtxRef.current.currentTime - startTimeRef.current;
+        setVal(Math.min(Math.max(wallElapsed, 0), effectiveDuration));
       } else if (!isPlaying) {
-        setVal(pauseOffsetRef.current);
+        // pauseOffsetRef stores buffer offset; convert to wall-clock
+        const wallPos = speed > 0 ? pauseOffsetRef.current / speed : 0;
+        setVal(wallPos);
       }
       reqRef.current = requestAnimationFrame(tick);
     };
     reqRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(reqRef.current);
-  }, [isPlaying, speed, duration, pauseOffsetRef]);
+  }, [isPlaying, speed, effectiveDuration, pauseOffsetRef]);
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
-      <span style={{ fontSize: 10, color: '#6b7280', fontFamily: "'Space Mono', monospace", width: 30, textAlign: "right" }}>
-        {Math.floor(val)}s
+      <span style={{ fontSize: 10, color: '#6b7280', fontFamily: "'Space Mono', monospace", width: 38, textAlign: "right" }}>
+        {formatTime(val)}
       </span>
       <div style={{ position: "relative", flex: 1, height: 6, background: "rgba(100,100,150,0.2)", borderRadius: 4 }}>
-        <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${(val / duration) * 100}%`, background: "linear-gradient(90deg, #a78bfa, #f472b6)", borderRadius: 4, transition: isPlaying ? "none" : "width 0.1s" }} />
+        <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${effectiveDuration > 0 ? (val / effectiveDuration) * 100 : 0}%`, background: "linear-gradient(90deg, #a78bfa, #f472b6)", borderRadius: 4, transition: isPlaying ? "none" : "width 0.1s" }} />
         <input
           type="range"
           min={0}
-          max={duration}
+          max={effectiveDuration}
           step={0.1}
           value={val}
           onChange={(e) => {
-            const v = parseFloat(e.target.value);
-            setVal(v);
-            onSeek(v);
+            const wallTime = parseFloat(e.target.value);
+            setVal(wallTime);
+            // Convert wall-clock time back to buffer offset for the audio engine
+            onSeek(wallTime * speed);
           }}
           style={{ position: "absolute", inset: 0, width: "100%", opacity: 0, cursor: 'pointer', height: "100%" }}
         />
       </div>
-      <span style={{ fontSize: 10, color: '#6b7280', fontFamily: "'Space Mono', monospace", width: 30 }}>
-        {Math.floor(duration)}s
+      <span style={{ fontSize: 10, color: '#6b7280', fontFamily: "'Space Mono', monospace", width: 38 }}>
+        {formatTime(effectiveDuration)}
       </span>
     </div>
   );
@@ -458,6 +473,7 @@ export default function SlowedReverbTool() {
   const pauseOffsetRef = useRef(0);
   const requestRef = useRef();
   const prevReverbParams = useRef({ size: 0, decay: 0, preDelay: 0 });
+  const prevSpeedRef = useRef(params.speed);
 
   // Update audio nodes in real time
   useEffect(() => {
@@ -475,6 +491,19 @@ export default function SlowedReverbTool() {
 
     try {
       const t = ctx.currentTime;
+
+      // When speed changes mid-playback, re-anchor startTimeRef to keep seeker accurate
+      const oldSpeed = prevSpeedRef.current;
+      const newSpeed = params.speed;
+      if (oldSpeed !== newSpeed && oldSpeed > 0 && newSpeed > 0) {
+        // Current buffer position = wallElapsed * oldSpeed
+        const wallElapsed = t - startTimeRef.current;
+        const bufferPos = wallElapsed * oldSpeed;
+        // Re-anchor: new wallElapsed at newSpeed for same bufferPos
+        startTimeRef.current = t - (bufferPos / newSpeed);
+        prevSpeedRef.current = newSpeed;
+      }
+
       if (nodes.source) nodes.source.playbackRate.setTargetAtTime(params.speed, t, 0.05);
       if (nodes.bass) nodes.bass.gain.setTargetAtTime(params.bassBoost, t, 0.05);
       if (nodes.warmFilter) nodes.warmFilter.gain.setTargetAtTime(-params.warmth, t, 0.05);
@@ -669,24 +698,17 @@ export default function SlowedReverbTool() {
     };
 
     source.start(0, pauseOffsetRef.current);
-    startTimeRef.current = ctx.currentTime - pauseOffsetRef.current / params.speed;
+    // startTimeRef = wall-clock anchor so that (ctx.currentTime - startTimeRef) = wall-clock elapsed
+    // pauseOffsetRef is in buffer-time; its wall-clock equivalent is pauseOffset / speed
+    startTimeRef.current = ctx.currentTime - (pauseOffsetRef.current / params.speed);
+    prevSpeedRef.current = params.speed;
     sourceNodeRef.current = source;
-
-    const animateTime = () => {
-      if (audioCtxRef.current && isPlaying) {
-        const elapsed = (audioCtxRef.current.currentTime - startTimeRef.current) * params.speed;
-        setCurrentTime(Math.min(elapsed, audioBuffer.duration));
-      }
-      requestRef.current = requestAnimationFrame(animateTime);
-    }
-    requestRef.current = requestAnimationFrame(animateTime);
 
     source.onended = () => {
       if (sourceNodeRef.current !== source) return; // Ignore if stopped manually
       
       setIsPlaying(false);
       pauseOffsetRef.current = 0;
-      setCurrentTime(0);
 
       // Handle Repeat (Loop)
       if (isRepeat) {
@@ -793,8 +815,10 @@ export default function SlowedReverbTool() {
 
   const togglePlay = () => {
     if (isPlaying) {
-      const elapsed = (audioCtxRef.current.currentTime - startTimeRef.current) * params.speed;
-      pauseOffsetRef.current = Math.min(elapsed, audioBuffer.duration);
+      // Wall-clock elapsed, convert to buffer offset: wallElapsed * speed
+      const wallElapsed = audioCtxRef.current.currentTime - startTimeRef.current;
+      const bufferPos = wallElapsed * params.speed;
+      pauseOffsetRef.current = Math.min(Math.max(bufferPos, 0), audioBuffer.duration);
       stopPlayback();
     } else {
       startPlayback();
@@ -804,7 +828,6 @@ export default function SlowedReverbTool() {
   const stopAudio = () => {
     stopPlayback();
     pauseOffsetRef.current = 0;
-    if (typeof setCurrentTime === 'function') setCurrentTime(0);
   };
 
   const handleExport = async () => {
@@ -1024,14 +1047,17 @@ export default function SlowedReverbTool() {
   const skipTime = (seconds) => {
     if (!audioBuffer) return;
     const currentSpeed = params.speed;
-    const elapsed = isPlaying
+    // Get current position in buffer time
+    const bufferPos = isPlaying
       ? (audioCtxRef.current.currentTime - startTimeRef.current) * currentSpeed
       : pauseOffsetRef.current;
 
-    let newElapsed = elapsed + seconds;
-    newElapsed = Math.max(0, Math.min(newElapsed, audioBuffer.duration));
+    // Skip operates in wall-clock seconds, convert to buffer offset
+    const bufferSkip = seconds * currentSpeed;
+    let newBufferPos = bufferPos + bufferSkip;
+    newBufferPos = Math.max(0, Math.min(newBufferPos, audioBuffer.duration));
 
-    pauseOffsetRef.current = newElapsed;
+    pauseOffsetRef.current = newBufferPos;
     if (isPlaying) {
       // Re-trigger playback which natively picks up params due to effect hooks
       stopPlayback();
@@ -1173,7 +1199,7 @@ export default function SlowedReverbTool() {
                 <div style={{ width: 36, height: 36, borderRadius: 8, background: "rgba(167,139,250,0.15)", border: "1px solid rgba(167,139,250,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}><Music size={20} color="#a78bfa" /></div>
                 <div style={{ textAlign: "left" }}>
                   <p style={{ margin: 0, fontSize: 12, fontFamily: "'Syne', sans-serif", fontWeight: 700, color: colors.text, maxWidth: 250, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</p>
-                  <p style={{ margin: 0, fontSize: 10, color: colors.textMuted }}>{(audioBuffer.duration / params.speed).toFixed(1)}s at {params.speed}x · {audioBuffer.numberOfChannels}ch</p>
+                  <p style={{ margin: 0, fontSize: 10, color: colors.textMuted }}>{formatTime(audioBuffer.duration / params.speed)} at {params.speed}x · {audioBuffer.numberOfChannels}ch</p>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -1396,6 +1422,25 @@ export default function SlowedReverbTool() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Voice: Original / Effect */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: colors.cardBg, borderRadius: 12, border: '1px solid ' + colors.cardBorder, marginBottom: 20 }}>
+          <span style={{ fontSize: 11, fontWeight: 'bold', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', flexShrink: 0 }}>Voice</span>
+          <div style={{ display: 'flex', flex: 1, background: colors.bg, borderRadius: 10, padding: 3, border: '1px solid ' + colors.cardBorder }}>
+            {[{ label: 'Original', val: true }, { label: 'Effect', val: false }].map(opt => {
+              const active = (params.preservePitch || false) === opt.val;
+              return (
+                <button key={opt.label} onClick={() => setParam('preservePitch', opt.val)} style={{
+                  flex: 1, padding: '7px 0', borderRadius: 8, fontSize: 12, fontWeight: 'bold', cursor: 'pointer',
+                  border: 'none', transition: 'all 0.25s',
+                  background: active ? 'linear-gradient(135deg, #7c3aed, #a855f7)' : 'transparent',
+                  color: active ? '#fff' : colors.textMuted,
+                  boxShadow: active ? '0 2px 8px rgba(124,58,237,0.3)' : 'none',
+                }}>{opt.label}</button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Fine Controls removed playbacks spacing from here */}

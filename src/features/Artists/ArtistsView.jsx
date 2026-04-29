@@ -22,7 +22,7 @@ export default function ArtistsView() {
       map[a].tracks.push(s);
       if (s.album) map[a].albums.add(s.album);
     });
-    let list = Object.values(map);
+    let list = Object.values(map).filter(a => a.name !== 'Unknown Artist');
     if (sortMode === 'count') list.sort((a, b) => b.tracks.length - a.tracks.length);
     else if (sortMode === 'alpha') list.sort((a, b) => a.name.localeCompare(b.name));
     else if (sortMode === 'albums') list.sort((a, b) => b.albums.size - a.albums.size);
@@ -154,6 +154,7 @@ export default function ArtistsView() {
               return (
                 <motion.div key={artist.name} whileHover={{ y: -4, scale: 1.03 }}
                   onClick={() => setArtistFilter(artist.name)}
+                  onContextMenu={(e) => { e.preventDefault(); useUIStore.getState().openContextMenu(e.clientX, e.clientY, null, { type: 'artist', name: artist.name, tracks: artist.tracks }); }}
                   style={{ cursor: 'pointer', textAlign: 'center' }}
                 >
                   <div style={{ width: '100%', display: 'flex', justifyContent: 'center', marginBottom: 10 }}>

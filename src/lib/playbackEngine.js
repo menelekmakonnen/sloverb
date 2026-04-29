@@ -22,6 +22,16 @@ class PlaybackEngine {
     usePlayerStore.subscribe((state) => {
       const changed = state.params !== prevParams || state.masterVolume !== prevVol;
       if (changed && this.source && state.isPlaying) {
+        // preservePitch can't be changed reliably on a live source in Chromium —
+        // do a seamless seek-in-place to recreate the source node with correct property
+        const pitchChanged = prevParams && (state.params.preservePitch || false) !== (prevParams.preservePitch || false);
+        if (pitchChanged && this.audioCtx) {
+          const currentPos = (this.audioCtx.currentTime - this.startTime) * state.params.speed;
+          prevParams = state.params;
+          prevVol = state.masterVolume;
+          this.seek(currentPos);
+          return;
+        }
         this.updateParams(state.params, state.masterVolume);
       }
       prevParams = state.params;
@@ -47,6 +57,7 @@ class PlaybackEngine {
     try {
       if (n.masterGain) n.masterGain.gain.setTargetAtTime(masterVolume, t, 0.05);
       if (n.source) n.source.playbackRate.setTargetAtTime(params.speed, t, 0.05);
+      if (n.source && 'preservesPitch' in n.source) n.source.preservesPitch = params.preservePitch || false;
       if (n.bass) n.bass.gain.setTargetAtTime(params.bassBoost, t, 0.05);
       if (n.warmFilter) n.warmFilter.gain.setTargetAtTime(-params.warmth, t, 0.05);
       if (n.dryGain) n.dryGain.gain.setTargetAtTime(1 - params.reverbMix * 0.6, t, 0.05);
@@ -66,6 +77,17 @@ class PlaybackEngine {
   }
 
   stop() {
+    // Record listen time before stopping
+    if (this.source && this.audioCtx && this.startTime > 0) {
+      try {
+        const elapsed = (this.audioCtx.currentTime - this.startTime) * (usePlayerStore.getState().params?.speed || 1);
+        const track = usePlayerStore.getState().currentTrack;
+        if (track && elapsed > 2) { // Only record if listened for > 2 seconds
+          const songId = track.path || track.id;
+          useLibraryStore.getState().recordListenTime(songId, elapsed);
+        }
+      } catch {}
+    }
     try { this.source?.stop(); } catch {}
     try { this.noiseSource?.stop(); } catch {}
     this.source = null;
@@ -144,8 +166,7 @@ class PlaybackEngine {
       const s = usePlayerStore.getState();
       if (s.isRepeat) {
         this.play();
-      } else if (s.queue.length > 0) {
-        // Auto play next in queue
+      } else if (s.queue.length > 0 || s.isShuffle || s.autoPlay) {
         this.playNext();
       }
     };
@@ -232,8 +253,8 @@ class PlaybackEngine {
     if (store.queue.length > 0) {
       nextItem = store.queue[0];
       store.removeFromQueue(0);
-    } else if (store.autoPlay) {
-      // Auto-play: pick random song from library
+    } else if (store.isShuffle || store.autoPlay) {
+      // Shuffle or autoPlay: pick random song from library
       const songs = useLibraryStore.getState().songs;
       if (songs.length === 0) return;
       const current = store.currentTrack;
@@ -241,7 +262,7 @@ class PlaybackEngine {
       const pick = candidates.length > 0 ? candidates[Math.floor(Math.random() * candidates.length)] : songs[Math.floor(Math.random() * songs.length)];
       nextItem = { type: 'library', name: pick.name, path: pick.path, id: pick.id, artist: pick.artist, album: pick.album };
     } else {
-      return; // autoPlay off, stop
+      return;
     }
 
     if (window.electronAPI && nextItem) {

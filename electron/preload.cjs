@@ -22,10 +22,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setDiscordActivity: (activity) => ipcRenderer.invoke('set-discord-activity', activity),
     onMediaPlayPause: (callback) => ipcRenderer.on('media-play-pause', callback),
     onMediaNext: (callback) => ipcRenderer.on('media-next', callback),
+    onMediaPrevious: (callback) => ipcRenderer.on('media-previous', callback),
+    sendThumbbarState: (isPlaying) => ipcRenderer.send('thumbar-playback-state', isPlaying),
     onOpenFile: (callback) => ipcRenderer.on('open-file', callback),
     removeMediaListeners: () => {
         ipcRenderer.removeAllListeners('media-play-pause');
         ipcRenderer.removeAllListeners('media-next');
+        ipcRenderer.removeAllListeners('media-previous');
         ipcRenderer.removeAllListeners('open-file');
     }
 });

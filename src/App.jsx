@@ -35,6 +35,19 @@ function App() {
       window.electronAPI.onMediaNext(() => {
         import('./lib/playbackEngine').then(({ playbackEngine }) => playbackEngine.playNext());
       });
+      window.electronAPI.onMediaPrevious(() => {
+        import('./lib/playbackEngine').then(({ playbackEngine }) => {
+          playbackEngine.seek(0);
+          if (!usePlayerStore.getState().isPlaying) playbackEngine.play();
+        });
+      });
+
+      // Report playback state to main process for taskbar thumbnail buttons
+      const unsubThumbbar = usePlayerStore.subscribe((state, prev) => {
+        if (state.isPlaying !== prev?.isPlaying) {
+          window.electronAPI.sendThumbbarState(state.isPlaying);
+        }
+      });
 
       window.electronAPI.onOpenFile(async (event, filePath) => {
         const filename = filePath.split('\\').pop().split('/').pop();
@@ -72,6 +85,7 @@ function App() {
 
       return () => {
         window.electronAPI.removeMediaListeners();
+        unsubThumbbar();
         clearInterval(iv);
       };
     }

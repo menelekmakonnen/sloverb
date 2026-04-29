@@ -1,5 +1,24 @@
 import { useState, useEffect } from 'react';
 
+/* ── Inject keyframes once globally ── */
+let keyframesInjected = false;
+function injectKeyframes() {
+  if (keyframesInjected) return;
+  keyframesInjected = true;
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes placeholder-pulse {
+      0%, 100% { transform: scale(1); opacity: 0.5; }
+      50% { transform: scale(1.08); opacity: 0.2; }
+    }
+    @keyframes placeholder-burst {
+      0% { opacity: 1; transform: scale(0.5); }
+      100% { opacity: 0; transform: scale(1.5); }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 /**
  * SVG placeholder for tracks/artists without album art.
  * STATIC by default — only animates on hover (pulse) and click (burst).
@@ -8,6 +27,9 @@ import { useState, useEffect } from 'react';
 export default function MusicPlaceholder({ seed = '', size = 40, style = {}, type = 'track' }) {
   const [hovered, setHovered] = useState(false);
   const [clicked, setClicked] = useState(false);
+
+  // Inject keyframes once on first mount
+  useEffect(() => { injectKeyframes(); }, []);
 
   // Deterministic hue from seed
   const hash = (seed || 'x').split('').reduce((a, b) => a + b.charCodeAt(0), 0);
@@ -30,7 +52,7 @@ export default function MusicPlaceholder({ seed = '', size = 40, style = {}, typ
       onMouseLeave={() => setHovered(false)}
       onClick={(e) => { e.stopPropagation(); setClicked(true); }}
       style={{
-        width: size, height: size, borderRadius: type === 'artist' ? '50%' : size * 0.18,
+        width: size, height: size, borderRadius: type === 'artist' ? '50%' : Math.min(size * 0.18, 14),
         overflow: 'hidden', flexShrink: 0, cursor: 'pointer',
         transition: 'transform 0.25s ease, box-shadow 0.25s ease',
         transform: `scale(${burstScale})`,
@@ -78,17 +100,6 @@ export default function MusicPlaceholder({ seed = '', size = 40, style = {}, typ
           animation: 'placeholder-burst 0.5s ease-out forwards',
         }} />
       )}
-
-      <style>{`
-        @keyframes placeholder-pulse {
-          0%, 100% { transform: scale(1); opacity: 0.5; }
-          50% { transform: scale(1.08); opacity: 0.2; }
-        }
-        @keyframes placeholder-burst {
-          0% { opacity: 1; transform: scale(0.5); }
-          100% { opacity: 0; transform: scale(1.5); }
-        }
-      `}</style>
     </div>
   );
 }

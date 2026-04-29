@@ -4,10 +4,10 @@ import { useUIStore } from '../stores/uiStore';
 import { usePlayerStore } from '../stores/playerStore';
 import { useLibraryStore } from '../stores/libraryStore';
 import { playbackEngine } from '../lib/playbackEngine';
-import { Play, FastForward, ListPlus, Trash2, ListMusic, ChevronRight, Radio, Download, Disc3, Users, FileText, Share2, Pin } from 'lucide-react';
+import { Play, FastForward, ListPlus, Trash2, ListMusic, ChevronRight, Radio, Download, Disc3, Users, FileText, Share2, Pin, FolderOpen, Shuffle } from 'lucide-react';
 
 export default function ContextMenu() {
-  const { contextMenu, closeContextMenu, addToast, setActiveView, setArtistFilter, setAlbumFilter, setCreditsTrack } = useUIStore();
+  const { contextMenu, closeContextMenu, addToast, setActiveView, setArtistFilter, setAlbumFilter, setCreditsTrack, setFolderFilter } = useUIStore();
   const { playlists, addToPlaylist, saveToDisk } = useLibraryStore();
   const menuRef = useRef(null);
   const [showPlaylists, setShowPlaylists] = useState(false);
@@ -29,28 +29,52 @@ export default function ContextMenu() {
     if (!contextMenu.isOpen) setShowPlaylists(false);
   }, [contextMenu.isOpen]);
 
-  if (!contextMenu.isOpen || !contextMenu.track) return null;
+  if (!contextMenu.isOpen) return null;
 
-  const track = contextMenu.track;
+  const { track, group } = contextMenu;
+  const isGroup = !!group;
 
-  const handleAction = async (action) => {
+  // If neither track nor group, bail
+  if (!track && !group) return null;
+
+  // ═══ HELPERS ═══
+  const playTrack = async (song) => {
+    if (!window.electronAPI) return;
+    try {
+      const buf = await window.electronAPI.readFile(song.path || song.id);
+      const isVid = song.name?.endsWith('.mp4') || song.type === 'video';
+      const f = new File([buf], song.name, { type: isVid ? 'video/mp4' : 'audio/wav' });
+      f.path = song.path || song.id;
+      playbackEngine.loadFileAndPlay(f, song);
+    } catch { addToast('Failed to load track', 'error'); }
+  };
+
+  const playAllTracks = (tracks) => {
+    if (tracks.length === 0) return;
+    const store = usePlayerStore.getState();
+    const rest = tracks.slice(1).map(s => ({ type: 'library', name: s.name, path: s.path, id: s.id }));
+    store.setQueue(rest);
+    playTrack(tracks[0]);
+  };
+
+  const queueAllTracks = (tracks) => {
+    const store = usePlayerStore.getState();
+    const items = tracks.map(s => ({ type: 'library', name: s.name, path: s.path, id: s.id }));
+    store.setQueue([...store.queue, ...items]);
+  };
+
+  // ═══ TRACK ACTIONS ═══
+  const handleTrackAction = async (action) => {
     const store = usePlayerStore.getState();
     const qItem = { type: 'library', name: track.name, path: track.path, id: track.id };
 
     switch (action) {
       case 'play':
         closeContextMenu();
-        if (window.electronAPI) {
-          const buf = await window.electronAPI.readFile(track.path || track.id);
-          const isVid = track.name?.endsWith('.mp4') || track.type === 'video';
-          const f = new File([buf], track.name, { type: isVid ? 'video/mp4' : 'audio/wav' });
-          f.path = track.path || track.id;
-          playbackEngine.loadFileAndPlay(f, track);
-        }
+        playTrack(track);
         break;
 
       case 'start_mix': {
-        // Queue songs by same artist
         const lib = useLibraryStore.getState();
         const artist = track.artist || 'Unknown Artist';
         const mixTracks = lib.songs
@@ -60,12 +84,7 @@ export default function ContextMenu() {
           .map(s => ({ type: 'library', name: s.name, path: s.path, id: s.id }));
         store.setQueue(mixTracks);
         closeContextMenu();
-        if (window.electronAPI) {
-          const buf = await window.electronAPI.readFile(track.path || track.id);
-          const f = new File([buf], track.name, { type: 'audio/wav' });
-          f.path = track.path || track.id;
-          playbackEngine.loadFileAndPlay(f, track);
-        }
+        playTrack(track);
         addToast(`Started mix: ${artist}`, 'success');
         break;
       }
@@ -95,7 +114,7 @@ export default function ContextMenu() {
       case 'download':
         if (track.path) {
           const folder = track.path.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
-          useUIStore.getState().setFolderFilter(folder);
+          setFolderFilter(folder);
           setActiveView('folders');
         }
         closeContextMenu();
@@ -135,16 +154,128 @@ export default function ContextMenu() {
     }
   };
 
+  // ═══ GROUP ACTIONS ═══
+  const handleGroupAction = async (action) => {
+    const tracks = group.tracks || [];
+
+    switch (action) {
+      case 'play_all':
+        closeContextMenu();
+        playAllTracks(tracks);
+        addToast(`Playing: ${group.name}`, 'success');
+        break;
+
+      case 'shuffle_play':
+        closeContextMenu();
+        playAllTracks([...tracks].sort(() => Math.random() - 0.5));
+        addToast(`Shuffling: ${group.name}`, 'success');
+        break;
+
+      case 'queue_all':
+        queueAllTracks(tracks);
+        addToast(`Queued ${tracks.length} tracks`, 'success');
+        closeContextMenu();
+        break;
+
+      case 'play_next_all': {
+        const store = usePlayerStore.getState();
+        const items = tracks.map(s => ({ type: 'library', name: s.name, path: s.path, id: s.id }));
+        store.setQueue([...items, ...store.queue]);
+        addToast(`Playing next: ${tracks.length} tracks`, 'info');
+        closeContextMenu();
+        break;
+      }
+
+      case 'start_mix': {
+        const lib = useLibraryStore.getState();
+        let mixPool = [];
+        if (group.type === 'artist') {
+          mixPool = lib.songs.filter(s => (s.artist || 'Unknown Artist') === group.name);
+        } else if (group.type === 'album') {
+          const albumArtist = tracks[0]?.artist;
+          mixPool = lib.songs.filter(s => s.artist === albumArtist);
+        } else {
+          mixPool = [...tracks];
+        }
+        const shuffled = mixPool.sort(() => Math.random() - 0.5);
+        closeContextMenu();
+        playAllTracks(shuffled.slice(0, 25));
+        addToast(`Started mix: ${group.name}`, 'success');
+        break;
+      }
+
+      case 'go_artist':
+        if (group.type === 'album' && tracks[0]?.artist) {
+          setArtistFilter(tracks[0].artist);
+          setActiveView('artists');
+        }
+        closeContextMenu();
+        break;
+
+      case 'go_album':
+        if (group.type === 'artist') {
+          // Find first album by this artist
+          const firstAlbum = tracks.find(t => t.album && t.album !== 'Unknown Album');
+          if (firstAlbum) {
+            setAlbumFilter(firstAlbum.album);
+            setActiveView('albums');
+          }
+        }
+        closeContextMenu();
+        break;
+
+      case 'show_folder':
+        if (group.type === 'folder') {
+          setFolderFilter(group.path || group.name);
+          setActiveView('folders');
+        } else if (tracks[0]?.path) {
+          const folder = tracks[0].path.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+          setFolderFilter(folder);
+          setActiveView('folders');
+        }
+        closeContextMenu();
+        break;
+
+      case 'share': {
+        const text = group.type === 'artist'
+          ? `🎤 ${group.name} — ${tracks.length} tracks`
+          : group.type === 'album'
+          ? `💿 ${group.name} — ${tracks[0]?.artist || 'Various Artists'}`
+          : `📁 ${group.name} — ${tracks.length} tracks`;
+        try {
+          await navigator.clipboard.writeText(text);
+          addToast('Copied to clipboard', 'success');
+        } catch { addToast('Could not copy', 'error'); }
+        closeContextMenu();
+        break;
+      }
+    }
+  };
+
   const handleAddToPlaylist = (plId) => {
-    addToPlaylist(plId, track.id);
+    if (isGroup) {
+      const tracks = group.tracks || [];
+      tracks.forEach(t => addToPlaylist(plId, t.id));
+    } else {
+      addToPlaylist(plId, track.id);
+    }
     saveToDisk();
     const pl = playlists.find(p => p.id === plId);
-    addToast(`Added to "${pl?.name}"`, 'success');
+    const count = isGroup ? (group.tracks?.length || 0) : 1;
+    addToast(`Added ${count} track${count > 1 ? 's' : ''} to "${pl?.name}"`, 'success');
     closeContextMenu();
   };
 
   const menuX = Math.min(contextMenu.x, window.innerWidth - 240);
   const menuY = Math.min(contextMenu.y, window.innerHeight - 480);
+
+  // ═══ HEADER ═══
+  const headerLabel = isGroup
+    ? `${group.type === 'artist' ? '🎤' : group.type === 'album' ? '💿' : '📁'} ${group.name}`
+    : track.name;
+  const headerSub = isGroup
+    ? `${group.tracks?.length || 0} tracks`
+    : null;
 
   return (
     <AnimatePresence>
@@ -162,90 +293,129 @@ export default function ContextMenu() {
           display: 'flex', flexDirection: 'column', gap: 1,
         }}
       >
-        {/* Track Name Header */}
-        <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-dim)', borderBottom: '1px solid var(--glass-border)', marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 240 }}>
-          {track.name}
+        {/* Header */}
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--glass-border)', marginBottom: 4 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 240 }}>
+            {headerLabel}
+          </div>
+          {headerSub && <div style={{ fontSize: 10, color: 'var(--text-dim)', opacity: 0.6, marginTop: 2 }}>{headerSub}</div>}
         </div>
 
-        <MenuItem icon={Radio} label="Start mix" onClick={() => handleAction('start_mix')} />
-        <MenuItem icon={FastForward} label="Play next" onClick={() => handleAction('play_next')} />
-        <MenuItem icon={ListPlus} label="Add to queue" onClick={() => handleAction('add_queue')} />
+        {isGroup ? (
+          /* ═══ GROUP MENU ═══ */
+          <>
+            <MenuItem icon={Play} label="Play all" onClick={() => handleGroupAction('play_all')} />
+            <MenuItem icon={Shuffle} label="Shuffle play" onClick={() => handleGroupAction('shuffle_play')} />
+            <MenuItem icon={FastForward} label="Play next" onClick={() => handleGroupAction('play_next_all')} />
+            <MenuItem icon={ListPlus} label="Add all to queue" onClick={() => handleGroupAction('queue_all')} />
+            <MenuItem icon={Radio} label="Start mix" onClick={() => handleGroupAction('start_mix')} />
 
-        <Divider />
+            <Divider />
 
-        <MenuItem icon={Trash2} label="Remove from library" onClick={() => handleAction('remove')} />
-        <MenuItem icon={Download} label="Show in folder" onClick={() => handleAction('download')} />
+            {/* Save to Playlist Submenu */}
+            <PlaylistSubmenu showPlaylists={showPlaylists} setShowPlaylists={setShowPlaylists} playlists={playlists} onAdd={handleAddToPlaylist} />
 
-        {/* Save to Playlist Submenu */}
-        <div style={{ position: 'relative' }}>
-          <button
-            onClick={() => setShowPlaylists(!showPlaylists)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '8px 12px', borderRadius: 6,
-              color: 'var(--text)', fontSize: 12, fontWeight: 500,
-              textAlign: 'left', width: '100%',
-              transition: 'background 0.1s', justifyContent: 'space-between',
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <ListMusic size={14} />
-              <span>Save to playlist</span>
-            </span>
-            <ChevronRight size={12} color="var(--text-dim)" />
-          </button>
+            <Divider />
 
-          <AnimatePresence>
-            {showPlaylists && (
-              <motion.div
-                initial={{ opacity: 0, x: -4 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -4 }}
-                style={{
-                  position: 'absolute', left: '100%', top: 0, marginLeft: 4,
-                  background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)',
-                  borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                  padding: 6, minWidth: 170, zIndex: 10001, maxHeight: 250, overflowY: 'auto',
-                }}
-              >
-                {playlists.length === 0 ? (
-                  <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-dim)' }}>No playlists yet</div>
-                ) : (
-                  playlists.map(pl => (
-                    <button key={pl.id} onClick={() => handleAddToPlaylist(pl.id)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '7px 12px', borderRadius: 4,
-                        color: 'var(--text)', fontSize: 12, fontWeight: 500,
-                        textAlign: 'left', width: '100%', transition: 'background 0.1s',
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                    >
-                      <ListMusic size={12} color="var(--accent)" />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pl.name}</span>
-                    </button>
-                  ))
-                )}
-              </motion.div>
+            {group.type === 'album' && (
+              <MenuItem icon={Users} label="Go to artist" onClick={() => handleGroupAction('go_artist')} />
             )}
-          </AnimatePresence>
-        </div>
+            {group.type === 'artist' && (
+              <MenuItem icon={Disc3} label="Go to albums" onClick={() => handleGroupAction('go_album')} />
+            )}
+            <MenuItem icon={FolderOpen} label="Show in folder" onClick={() => handleGroupAction('show_folder')} />
+            <MenuItem icon={Share2} label="Share" onClick={() => handleGroupAction('share')} />
+          </>
+        ) : (
+          /* ═══ TRACK MENU ═══ */
+          <>
+            <MenuItem icon={Radio} label="Start mix" onClick={() => handleTrackAction('start_mix')} />
+            <MenuItem icon={FastForward} label="Play next" onClick={() => handleTrackAction('play_next')} />
+            <MenuItem icon={ListPlus} label="Add to queue" onClick={() => handleTrackAction('add_queue')} />
 
-        <Divider />
+            <Divider />
 
-        <MenuItem icon={Disc3} label="Go to album" onClick={() => handleAction('go_album')} />
-        <MenuItem icon={Users} label="Go to artist" onClick={() => handleAction('go_artist')} />
-        <MenuItem icon={FileText} label="View song credits" onClick={() => handleAction('credits')} />
+            <MenuItem icon={Trash2} label="Remove from library" onClick={() => handleTrackAction('remove')} />
+            <MenuItem icon={Download} label="Show in folder" onClick={() => handleTrackAction('download')} />
 
-        <Divider />
+            {/* Save to Playlist Submenu */}
+            <PlaylistSubmenu showPlaylists={showPlaylists} setShowPlaylists={setShowPlaylists} playlists={playlists} onAdd={handleAddToPlaylist} />
 
-        <MenuItem icon={Share2} label="Share" onClick={() => handleAction('share')} />
-        <MenuItem icon={Pin} label="Pin to Listen again" onClick={() => handleAction('pin')} />
+            <Divider />
+
+            <MenuItem icon={Disc3} label="Go to album" onClick={() => handleTrackAction('go_album')} />
+            <MenuItem icon={Users} label="Go to artist" onClick={() => handleTrackAction('go_artist')} />
+            <MenuItem icon={FileText} label="View song credits" onClick={() => handleTrackAction('credits')} />
+
+            <Divider />
+
+            <MenuItem icon={Share2} label="Share" onClick={() => handleTrackAction('share')} />
+            <MenuItem icon={Pin} label="Pin to Listen again" onClick={() => handleTrackAction('pin')} />
+          </>
+        )}
       </motion.div>
     </AnimatePresence>
+  );
+}
+
+function PlaylistSubmenu({ showPlaylists, setShowPlaylists, playlists, onAdd }) {
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={() => setShowPlaylists(!showPlaylists)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '8px 12px', borderRadius: 6,
+          color: 'var(--text)', fontSize: 12, fontWeight: 500,
+          textAlign: 'left', width: '100%',
+          transition: 'background 0.1s', justifyContent: 'space-between',
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <ListMusic size={14} />
+          <span>Save to playlist</span>
+        </span>
+        <ChevronRight size={12} color="var(--text-dim)" />
+      </button>
+
+      <AnimatePresence>
+        {showPlaylists && (
+          <motion.div
+            initial={{ opacity: 0, x: -4 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -4 }}
+            style={{
+              position: 'absolute', left: '100%', top: 0, marginLeft: 4,
+              background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)',
+              borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+              padding: 6, minWidth: 170, zIndex: 10001, maxHeight: 250, overflowY: 'auto',
+            }}
+          >
+            {playlists.length === 0 ? (
+              <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-dim)' }}>No playlists yet</div>
+            ) : (
+              playlists.map(pl => (
+                <button key={pl.id} onClick={() => onAdd(pl.id)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '7px 12px', borderRadius: 4,
+                    color: 'var(--text)', fontSize: 12, fontWeight: 500,
+                    textAlign: 'left', width: '100%', transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <ListMusic size={12} color="var(--accent)" />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pl.name}</span>
+                </button>
+              ))
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 

@@ -145,6 +145,7 @@ export default function FolderView() {
     return (
       <motion.div whileHover={{ y: -3, scale: 1.02 }}
         onClick={() => setFolderFilter(f)}
+        onContextMenu={(e) => { e.preventDefault(); const name = f.split('/').filter(Boolean).pop() || f; useUIStore.getState().openContextMenu(e.clientX, e.clientY, null, { type: 'folder', name, path: f, tracks: folderMap[f] }); }}
         style={{
           width: 140, cursor: 'pointer', textAlign: 'center', flexShrink: 0,
         }}
@@ -173,6 +174,7 @@ export default function FolderView() {
         const shortName = f.split('/').filter(Boolean).slice(-2).join(' / ') || f;
         return (
           <div key={f} onClick={() => setFolderFilter(f)}
+            onContextMenu={(e) => { e.preventDefault(); useUIStore.getState().openContextMenu(e.clientX, e.clientY, null, { type: 'folder', name: deepName, path: f, tracks: folderMap[f] }); }}
             style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', borderRadius: 10, cursor: 'pointer', transition: 'background 0.15s' }}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}

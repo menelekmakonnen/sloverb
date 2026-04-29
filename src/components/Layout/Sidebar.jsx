@@ -36,10 +36,11 @@ export default function Sidebar() {
       transition={{ type: 'spring', damping: 25, stiffness: 300 }}
       style={{
         height: '100%', display: 'flex', flexDirection: 'column',
-        background: spaceAdventure !== 'off' ? 'rgba(10, 10, 30, 0.6)' : 'var(--bg-surface)',
-        borderRight: 'none', flexShrink: 0, overflow: 'hidden',
+        background: mode === 'light' ? 'var(--bg-surface)' : (spaceAdventure !== 'off' ? 'rgba(10, 10, 30, 0.6)' : 'var(--bg-surface)'),
+        borderRight: mode === 'light' ? '1px solid var(--glass-border)' : 'none',
+        flexShrink: 0, overflow: 'hidden',
         position: 'relative',
-        backdropFilter: spaceAdventure !== 'off' ? 'blur(10px)' : 'none',
+        backdropFilter: mode === 'dark' && spaceAdventure !== 'off' ? 'blur(10px)' : 'none',
       }}
     >
       {/* Logo */}

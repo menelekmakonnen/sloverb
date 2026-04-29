@@ -1,7 +1,7 @@
 import { usePlayerStore } from '../../stores/playerStore';
 import { useUIStore } from '../../stores/uiStore';
 import { motion } from 'framer-motion';
-import { Music, Download, Check, Globe, Play, Pause, Disc3 } from 'lucide-react';
+import { Music, Download, Check, Globe, Play, Pause, Disc3, Mic, MicOff } from 'lucide-react';
 import { extractAudioFromVideo, muxAudioToVideo } from '../../ffmpegProcessor.js';
 import { encodeWAV, buildOfflineChain, PRESETS } from '../../lib/audioEngine.js';
 import { playbackEngine } from '../../lib/playbackEngine.js';
@@ -161,7 +161,6 @@ export default function StudioView() {
   const { params, setParam, audioBuffer, fileName, isExporting, exportProgress, exportDone, isProcessing, loadingText, progress, isVideo, originalVideoFile, activePresets, savedPresets, youtubeUrl, isPlaying, currentTime, analyserRef, albumArt } = store;
 
   const formatTime = (s) => { if (!s || isNaN(s)) return '0:00'; return `${Math.floor(s/60)}:${Math.floor(s%60).toString().padStart(2,'0')}`; };
-  const displayDuration = audioBuffer ? audioBuffer.duration / (params.speed || 1) : 0;
 
   const handleDrop = (e) => { e.preventDefault(); handleFile(e.dataTransfer?.files[0]); };
   const handleFile = async (f) => {
@@ -267,7 +266,7 @@ export default function StudioView() {
               {fileName || 'No Track Loaded'}
             </h2>
             <p style={{ fontSize: 12, color: 'var(--text-dim)', margin: '0 0 12px' }}>
-              {audioBuffer ? `${formatTime(displayDuration)} • ${params.speed}x • ${audioBuffer.numberOfChannels}ch` : 'Drop a file or load from YouTube'}
+              {audioBuffer ? `${formatTime(audioBuffer.duration)} • ${params.speed}x • ${audioBuffer.numberOfChannels}ch` : 'Drop a file or load from YouTube'}
             </p>
 
             {/* Play + Seek */}
@@ -285,9 +284,9 @@ export default function StudioView() {
               <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-dim)', width: 36, textAlign: 'right' }}>{formatTime(currentTime)}</span>
               <div style={{ flex: 1, position: 'relative', height: 6, background: 'var(--glass-border)', borderRadius: 3, cursor: audioBuffer ? 'pointer' : 'default' }}
                 onClick={e => { if (!audioBuffer) return; const rect = e.currentTarget.getBoundingClientRect(); const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)); playbackEngine.seek(pct * audioBuffer.duration); }}>
-                <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${displayDuration ? (currentTime / displayDuration) * 100 : 0}%`, background: 'linear-gradient(90deg, var(--accent), var(--accent-hot))', borderRadius: 3, boxShadow: '0 0 8px var(--accent-glow)' }} />
+                <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${audioBuffer ? (currentTime / audioBuffer.duration) * 100 : 0}%`, background: 'linear-gradient(90deg, var(--accent), var(--accent-hot))', borderRadius: 3, boxShadow: '0 0 8px var(--accent-glow)' }} />
               </div>
-              <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-dim)', width: 36 }}>{formatTime(displayDuration)}</span>
+              <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-dim)', width: 36 }}>{formatTime(audioBuffer?.duration || 0)}</span>
             </div>
 
             {/* Waveform */}
@@ -375,31 +374,89 @@ export default function StudioView() {
           </div>
         </div>
 
-        {/* ═══ UP NEXT ═══ */}
+        {/* ═══ VOICE: ORIGINAL / EFFECT ═══ */}
+        <div className="glass-panel" style={{ padding: '10px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', flexShrink: 0 }}>Voice</span>
+          <div style={{ display: 'flex', flex: 1, background: 'var(--bg-elevated)', borderRadius: 10, padding: 3, border: '1px solid var(--glass-border)' }}>
+            {[{ label: 'Original', val: true }, { label: 'Effect', val: false }].map(opt => {
+              const active = (params.preservePitch || false) === opt.val;
+              return (
+                <button key={opt.label} onClick={() => setParam('preservePitch', opt.val)} style={{
+                  flex: 1, padding: '7px 0', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                  border: 'none', transition: 'all 0.25s',
+                  background: active ? 'linear-gradient(135deg, var(--accent), var(--accent-secondary))' : 'transparent',
+                  color: active ? '#fff' : 'var(--text-dim)',
+                  boxShadow: active ? '0 2px 8px var(--accent-glow)' : 'none',
+                }}>{opt.label}</button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ═══ UP NEXT (Interactive: double-click to play, drag to rearrange) ═══ */}
         {store.queue.length > 0 && (
           <div style={{ marginBottom: 24 }}>
-            <p style={{ color: 'var(--text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.12em', margin: '0 0 12px', fontWeight: 700 }}>Up Next</p>
-            <div style={{ background: 'var(--bg-surface)', borderRadius: 12, border: '1px solid var(--glass-border)', overflow: 'hidden' }}>
-              {store.queue.slice(0, 5).map((q, i) => {
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <p style={{ color: 'var(--text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.12em', margin: 0, fontWeight: 700 }}>Up Next ({store.queue.length})</p>
+              <button onClick={() => store.clearQueue()} style={{ fontSize: 10, color: 'var(--text-dim)', background: 'none', border: '1px solid var(--glass-border)', borderRadius: 12, padding: '3px 10px', cursor: 'pointer' }}>Clear</button>
+            </div>
+            <div style={{ background: 'var(--bg-surface)', borderRadius: 12, border: '1px solid var(--glass-border)', overflow: 'hidden', maxHeight: 320, overflowY: 'auto' }}>
+              {store.queue.map((q, i) => {
                 const hash = (q.name || '').split('').reduce((a, b) => a + b.charCodeAt(0), 0);
                 const h = hash % 360;
                 return (
-                  <div key={q.id + i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 14px', borderBottom: i < Math.min(store.queue.length, 5) - 1 ? '1px solid var(--glass-border)' : 'none' }}>
+                  <div
+                    key={(q.id || q.name) + i}
+                    draggable
+                    onDragStart={(e) => e.dataTransfer.setData('queue-index', i.toString())}
+                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderTop = '2px solid var(--accent)'; }}
+                    onDragLeave={(e) => { e.currentTarget.style.borderTop = 'none'; }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.currentTarget.style.borderTop = 'none';
+                      const fromIdx = parseInt(e.dataTransfer.getData('queue-index'));
+                      if (isNaN(fromIdx) || fromIdx === i) return;
+                      const newQueue = [...store.queue];
+                      const [moved] = newQueue.splice(fromIdx, 1);
+                      newQueue.splice(i, 0, moved);
+                      store.setQueue(newQueue);
+                    }}
+                    onDoubleClick={async () => {
+                      if (!window.electronAPI) return;
+                      try {
+                        const buf = await window.electronAPI.readFile(q.path || q.id);
+                        const f = new File([buf], q.name, { type: q.name?.endsWith('.mp4') ? 'video/mp4' : 'audio/wav' });
+                        f.path = q.path || q.id;
+                        playbackEngine.loadFileAndPlay(f, q);
+                        const newQueue = [...store.queue];
+                        newQueue.splice(i, 1);
+                        store.setQueue(newQueue);
+                      } catch { addToast('Failed to play', 'error'); }
+                    }}
+                    className="queue-row"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12, padding: '8px 14px',
+                      borderBottom: i < store.queue.length - 1 ? '1px solid var(--glass-border)' : 'none',
+                      cursor: 'grab', transition: 'background 0.15s', borderTop: 'none',
+                    }}
+                  >
+                    <span style={{ fontSize: 10, color: 'var(--text-dim)', cursor: 'grab', userSelect: 'none' }}>⠿</span>
                     <span style={{ fontSize: 11, color: 'var(--text-dim)', width: 18, textAlign: 'right', flexShrink: 0 }}>{i + 1}</span>
                     <div style={{ width: 32, height: 32, borderRadius: 6, background: `linear-gradient(135deg, hsl(${h},60%,50%), hsl(${(h+40)%360},55%,35%))`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <Music size={12} color="rgba(255,255,255,0.5)" />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q.name}</p>
+                      <p style={{ margin: '1px 0 0', fontSize: 10, color: 'var(--text-dim)' }}>{q.artist || 'Unknown'}</p>
                     </div>
-                    <button onClick={() => { const newQ = [...store.queue]; newQ.splice(i, 1); store.setQueue(newQ); }} style={{ color: 'var(--text-dim)', fontSize: 10, padding: 2 }}>✕</button>
+                    <button onClick={(e) => { e.stopPropagation(); const newQ = [...store.queue]; newQ.splice(i, 1); store.setQueue(newQ); }} style={{ color: 'var(--text-dim)', fontSize: 10, padding: 2, cursor: 'pointer', background: 'none', border: 'none' }}>✕</button>
                   </div>
                 );
               })}
-              {store.queue.length > 5 && (
-                <div style={{ padding: '6px 14px', fontSize: 11, color: 'var(--text-dim)', textAlign: 'center' }}>+{store.queue.length - 5} more</div>
-              )}
             </div>
+            <style>{`
+              .queue-row:hover { background: var(--bg-hover); }
+            `}</style>
           </div>
         )}
 

@@ -64,7 +64,7 @@ export default function HistoryView() {
   const topArtists = {};
   const topSongs = {};
   playHistory.forEach(h => {
-    if (h.artist) topArtists[h.artist] = (topArtists[h.artist] || 0) + 1;
+    if (h.artist && h.artist !== 'Unknown Artist' && h.artist !== 'Unknown') topArtists[h.artist] = (topArtists[h.artist] || 0) + 1;
     if (h.name) topSongs[h.name] = (topSongs[h.name] || 0) + 1;
   });
   const sortedArtists = Object.entries(topArtists).sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -241,26 +241,44 @@ export default function HistoryView() {
               )}
             </div>
 
-            {/* Mini Stats */}
+            {/* Mini Stats — Interactive */}
             {playHistory.length > 3 && (
               <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: 160, padding: '14px 16px', borderRadius: 12, background: 'var(--bg-surface)', border: '1px solid var(--glass-border)' }}>
                   <div style={{ fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Top Artists</div>
-                  {sortedArtists.map(([name, count], i) => (
-                    <div key={name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: i === 0 ? 'var(--accent)' : 'var(--text)', padding: '2px 0', fontWeight: i === 0 ? 600 : 400 }}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
-                      <span style={{ color: 'var(--text-dim)', flexShrink: 0, marginLeft: 8 }}>{count} plays</span>
-                    </div>
-                  ))}
+                  {sortedArtists.map(([name, count], i) => {
+                    const artistSong = playHistory.find(h => h.artist === name && h.path);
+                    return (
+                      <div key={name}
+                        onClick={() => { useUIStore.getState().setArtistFilter(name); useUIStore.getState().setActiveView('artists'); }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: i === 0 ? 'var(--accent)' : 'var(--text)', padding: '4px 6px', fontWeight: i === 0 ? 600 : 400, borderRadius: 8, cursor: 'pointer', transition: 'background 0.15s' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <ArtThumb path={artistSong?.path} seed={name} size={24} type="artist" />
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+                        <span style={{ color: 'var(--text-dim)', flexShrink: 0, fontSize: 10 }}>{count} plays</span>
+                      </div>
+                    );
+                  })}
                 </div>
                 <div style={{ flex: 1, minWidth: 160, padding: '14px 16px', borderRadius: 12, background: 'var(--bg-surface)', border: '1px solid var(--glass-border)' }}>
                   <div style={{ fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Most Played</div>
-                  {sortedSongs.map(([name, count], i) => (
-                    <div key={name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: i === 0 ? 'var(--accent)' : 'var(--text)', padding: '2px 0', fontWeight: i === 0 ? 600 : 400 }}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{name}</span>
-                      <span style={{ color: 'var(--text-dim)', flexShrink: 0, marginLeft: 8 }}>{count}×</span>
-                    </div>
-                  ))}
+                  {sortedSongs.map(([name, count], i) => {
+                    const songItem = playHistory.find(h => h.name === name && h.path);
+                    return (
+                      <div key={name}
+                        onClick={() => songItem && handlePlay(songItem)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: i === 0 ? 'var(--accent)' : 'var(--text)', padding: '4px 6px', fontWeight: i === 0 ? 600 : 400, borderRadius: 8, cursor: 'pointer', transition: 'background 0.15s' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <ArtThumb path={songItem?.path} seed={name} size={24} />
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{name}</span>
+                        <span style={{ color: 'var(--text-dim)', flexShrink: 0, fontSize: 10 }}>{count}×</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

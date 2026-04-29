@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, dialog, session, Tray, Menu, globalShortcut } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, session, Tray, Menu, globalShortcut, nativeImage } from 'electron';
 import youtubedl from 'youtube-dl-exec';
 import path from 'path';
 import fs from 'fs';
@@ -100,6 +100,7 @@ ipcMain.handle('read-file', async (event, filePath) => {
     throw new Error('File not found: ' + target);
 });
 
+
 ipcMain.handle('open-generation', async (event, fileName) => {
     const filePath = path.join(generationsDir, fileName);
     if (fs.existsSync(filePath)) {
@@ -167,41 +168,90 @@ ipcMain.handle('remove-from-library', (event, id) => {
     return data;
 });
 
-ipcMain.handle('get-album-art', async (event, filePath) => {
-    try {
-        if (!filePath || !fs.existsSync(filePath)) return null;
-        // 1. Try embedded metadata
-        const metadata = await mm.parseFile(filePath);
-        const picture = metadata.common.picture;
-        if (picture && picture.length > 0) {
-            return `data:${picture[0].format};base64,${picture[0].data.toString('base64')}`;
-        }
-        // 2. Fallback: look for cover art images in the same folder
-        const dir = path.dirname(filePath);
-        const coverNames = ['cover', 'folder', 'album', 'front', 'artwork', 'thumb'];
-        const imgExts = ['.jpg', '.jpeg', '.png', '.webp', '.bmp'];
-        const dirFiles = fs.readdirSync(dir);
-        for (const name of coverNames) {
-            for (const ext of imgExts) {
-                const candidate = dirFiles.find(f => f.toLowerCase() === name + ext);
-                if (candidate) {
-                    const imgPath = path.join(dir, candidate);
-                    const imgData = fs.readFileSync(imgPath);
-                    const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
-                    return `data:${mime};base64,${imgData.toString('base64')}`;
-                }
+// ── Album art cache & concurrency limiter ──
+const albumArtCache = new Map();
+const ALBUM_ART_CACHE_MAX = 500;
+const albumArtInFlight = new Map(); // dedup concurrent requests for same path
+let artConcurrency = 0;
+const ART_MAX_CONCURRENCY = 3;
+const artQueue = [];
+
+function runArtQueue() {
+    while (artConcurrency < ART_MAX_CONCURRENCY && artQueue.length > 0) {
+        const { resolve, reject, filePath } = artQueue.shift();
+        artConcurrency++;
+        _fetchAlbumArt(filePath)
+            .then(resolve)
+            .catch(reject)
+            .finally(() => { artConcurrency--; runArtQueue(); });
+    }
+}
+
+async function _fetchAlbumArt(filePath) {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    // 1. Try embedded metadata
+    const metadata = await mm.parseFile(filePath);
+    const picture = metadata.common.picture;
+    if (picture && picture.length > 0) {
+        return `data:${picture[0].format};base64,${picture[0].data.toString('base64')}`;
+    }
+    // 2. Fallback: look for cover art images in the same folder
+    const dir = path.dirname(filePath);
+    const coverNames = ['cover', 'folder', 'album', 'front', 'artwork', 'thumb'];
+    const imgExts = ['.jpg', '.jpeg', '.png', '.webp', '.bmp'];
+    const dirFiles = fs.readdirSync(dir);
+    for (const name of coverNames) {
+        for (const ext of imgExts) {
+            const candidate = dirFiles.find(f => f.toLowerCase() === name + ext);
+            if (candidate) {
+                const imgPath = path.join(dir, candidate);
+                const imgData = fs.readFileSync(imgPath);
+                const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+                return `data:${mime};base64,${imgData.toString('base64')}`;
             }
         }
-        // 3. Fallback: any image file in the folder
-        const anyImg = dirFiles.find(f => imgExts.some(e => f.toLowerCase().endsWith(e)));
-        if (anyImg) {
-            const imgPath = path.join(dir, anyImg);
-            const imgData = fs.readFileSync(imgPath);
-            const ext = path.extname(anyImg).toLowerCase();
-            const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
-            return `data:${mime};base64,${imgData.toString('base64')}`;
+    }
+    // 3. Fallback: any image file in the folder
+    const anyImg = dirFiles.find(f => imgExts.some(e => f.toLowerCase().endsWith(e)));
+    if (anyImg) {
+        const imgPath = path.join(dir, anyImg);
+        const imgData = fs.readFileSync(imgPath);
+        const ext = path.extname(anyImg).toLowerCase();
+        const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+        return `data:${mime};base64,${imgData.toString('base64')}`;
+    }
+    return null;
+}
+
+ipcMain.handle('get-album-art', async (event, filePath) => {
+    try {
+        // 1. Return from cache immediately
+        if (albumArtCache.has(filePath)) {
+            return albumArtCache.get(filePath);
         }
-        return null;
+        // 2. Dedup: if already in-flight for this path, await same promise
+        if (albumArtInFlight.has(filePath)) {
+            return await albumArtInFlight.get(filePath);
+        }
+        // 3. Queue with concurrency limit
+        const promise = new Promise((resolve, reject) => {
+            artQueue.push({ resolve, reject, filePath });
+            runArtQueue();
+        }).then(result => {
+            // Cache result (LRU eviction)
+            if (albumArtCache.size >= ALBUM_ART_CACHE_MAX) {
+                const oldest = albumArtCache.keys().next().value;
+                albumArtCache.delete(oldest);
+            }
+            albumArtCache.set(filePath, result);
+            albumArtInFlight.delete(filePath);
+            return result;
+        }).catch(e => {
+            albumArtInFlight.delete(filePath);
+            return null;
+        });
+        albumArtInFlight.set(filePath, promise);
+        return await promise;
     } catch (e) {
         return null;
     }
@@ -476,6 +526,44 @@ app.setAppUserModelId('com.icunigroup.sloverb');
 
 let tray = null;
 let mainWindow = null;
+let isCurrentlyPlaying = false;
+
+// ── Taskbar Thumbnail Toolbar Icons (16x16 SVG → nativeImage) ──
+function makeSvgIcon(svgContent) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">${svgContent}</svg>`;
+    const encoded = Buffer.from(svg).toString('base64');
+    return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${encoded}`);
+}
+
+const prevIcon = makeSvgIcon('<polygon points="3,3 3,13 5,13 5,3" fill="white"/><polygon points="5,8 13,3 13,13" fill="white"/>');
+const playIcon = makeSvgIcon('<polygon points="4,2 4,14 14,8" fill="white"/>');
+const pauseIcon = makeSvgIcon('<rect x="3" y="2" width="4" height="12" rx="1" fill="white"/><rect x="9" y="2" width="4" height="12" rx="1" fill="white"/>');
+const nextIcon = makeSvgIcon('<polygon points="3,3 3,13 11,8" fill="white"/><polygon points="11,3 13,3 13,13 11,13" fill="white"/>');
+
+function updateThumbarButtons(win) {
+    if (!win || win.isDestroyed()) return;
+    try {
+        win.setThumbarButtonList([
+            {
+                tooltip: 'Previous',
+                icon: prevIcon,
+                click: () => { win.webContents.send('media-previous'); }
+            },
+            {
+                tooltip: isCurrentlyPlaying ? 'Pause' : 'Play',
+                icon: isCurrentlyPlaying ? pauseIcon : playIcon,
+                click: () => { win.webContents.send('media-play-pause'); }
+            },
+            {
+                tooltip: 'Next',
+                icon: nextIcon,
+                click: () => { win.webContents.send('media-next'); }
+            }
+        ]);
+    } catch (e) {
+        // Thumbar not supported on this platform
+    }
+}
 let fileToOpen = null;
 
 // Handle macOS open-file event
@@ -532,6 +620,16 @@ app.whenReady().then(() => {
 
     mainWindow = createWindow();
 
+    // Initialize taskbar thumbnail buttons
+    mainWindow.once('ready-to-show', () => updateThumbarButtons(mainWindow));
+    mainWindow.webContents.on('did-finish-load', () => updateThumbarButtons(mainWindow));
+
+    // Listen for playback state changes from renderer to update play/pause icon
+    ipcMain.on('thumbar-playback-state', (event, playing) => {
+        isCurrentlyPlaying = playing;
+        updateThumbarButtons(mainWindow);
+    });
+
     // Setup Tray
     tray = new Tray(path.join(__dirname, '../public/logo.png'));
     const contextMenu = Menu.buildFromTemplate([
@@ -548,6 +646,9 @@ app.whenReady().then(() => {
     // Setup Global Shortcuts
     globalShortcut.register('MediaPlayPause', () => {
         if (mainWindow) mainWindow.webContents.send('media-play-pause');
+    });
+    globalShortcut.register('MediaPreviousTrack', () => {
+        if (mainWindow) mainWindow.webContents.send('media-previous');
     });
     globalShortcut.register('MediaNextTrack', () => {
         if (mainWindow) mainWindow.webContents.send('media-next');

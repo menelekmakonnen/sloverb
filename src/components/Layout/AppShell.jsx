@@ -2,6 +2,8 @@ import TitleBar from './TitleBar';
 import Sidebar from './Sidebar';
 import NowPlayingBar from './NowPlayingBar';
 import SpaceBackground from '../SpaceBackground';
+import HarmattanBackground from '../HarmattanBackground';
+
 import ToastContainer from '../Toast';
 import QueueDrawer from '../QueueDrawer';
 import ContextMenu from '../ContextMenu';
@@ -9,7 +11,8 @@ import ScrollNav from '../ScrollNav';
 import { useUIStore } from '../../stores/uiStore';
 import { usePlayerStore } from '../../stores/playerStore';
 import { PRESETS } from '../../lib/audioEngine.js';
-import { useEffect } from 'react';
+import { playbackEngine } from '../../lib/playbackEngine.js';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import StudioView from '../../features/Studio/StudioView';
@@ -23,8 +26,28 @@ import SettingsView from '../../features/Settings/SettingsView';
 import FolderView from '../../features/Folders/FolderView';
 
 export default function AppShell() {
-  const { activeView, mode, creditsTrack, setCreditsTrack, studioDrawerOpen, setStudioDrawerOpen, spaceAdventure } = useUIStore();
+  const { activeView, mode, creditsTrack, setCreditsTrack, studioDrawerOpen, setStudioDrawerOpen, spaceAdventure, superImmersive, backgroundTheme, cycleBackgroundTheme } = useUIStore();
   const immersive = spaceAdventure === 'immersive';
+
+  // ── Inactivity timer for immersive mode (10s fade) ──
+  const [immersiveActive, setImmersiveActive] = useState(true);
+  const inactivityTimer = useRef(null);
+  const resetActivity = useCallback(() => {
+    setImmersiveActive(true);
+    if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+    inactivityTimer.current = setTimeout(() => setImmersiveActive(false), 10000);
+  }, []);
+  useEffect(() => {
+    if (!immersive || superImmersive) return;
+    resetActivity();
+    window.addEventListener('mousemove', resetActivity);
+    window.addEventListener('mousedown', resetActivity);
+    return () => {
+      window.removeEventListener('mousemove', resetActivity);
+      window.removeEventListener('mousedown', resetActivity);
+      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+    };
+  }, [immersive, superImmersive, resetActivity]);
 
   // Global scroll wheel → volume control (Ctrl+scroll to avoid hijacking page scroll)
   useEffect(() => {
@@ -38,6 +61,44 @@ export default function AppShell() {
     };
     window.addEventListener('wheel', handleWheel, { passive: false });
     return () => window.removeEventListener('wheel', handleWheel);
+  }, []);
+
+  // ── Keyboard shortcuts: Space=play/pause, Esc=cycle back, MediaStop=stop ──
+  useEffect(() => {
+    const handleKey = (e) => {
+      // Don't intercept when typing in inputs
+      const tag = e.target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable) return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        playbackEngine.togglePlay();
+      } else if (e.code === 'Escape') {
+        e.preventDefault();
+        const ui = useUIStore.getState();
+        if (ui.superImmersive) {
+          // Super Immersive → Normal Immersive
+          ui.setSuperImmersive(false);
+        } else if (ui.spaceAdventure === 'immersive') {
+          // Immersive → Standard (flight on)
+          ui.setSpaceAdventure('on');
+        } else if (ui.spaceAdventure === 'on') {
+          // Flight on → Flight off
+          ui.setSpaceAdventure('off');
+        } else {
+          // Standard → go to studio view
+          ui.setActiveView('studio');
+          ui.setStudioDrawerOpen(false);
+        }
+      } else if (e.key === 'MediaStop' || e.code === 'MediaStop') {
+        e.preventDefault();
+        playbackEngine.stop();
+        playbackEngine.pauseOffset = 0;
+        usePlayerStore.getState().setCurrentTime(0);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
   const renderView = () => {
@@ -66,8 +127,10 @@ export default function AppShell() {
       overflow: 'hidden',
       position: 'relative',
     }}>
-      {/* Cosmic Background — completely unmounted in light mode */}
-      {mode === 'dark' && <SpaceBackground />}
+      {/* Background — Space or Harmattan */}
+      {mode === 'dark' && (
+        backgroundTheme === 'harmattan' ? <HarmattanBackground /> : <SpaceBackground />
+      )}
 
       {/* Title Bar — animated fold-away */}
       <AnimatePresence>
@@ -113,7 +176,7 @@ export default function AppShell() {
 
       {/* Studio Drawer — slides up from NowPlayingBar */}
       <AnimatePresence>
-        {studioDrawerOpen && !immersive && (
+        {studioDrawerOpen && (
           <motion.div
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
@@ -132,16 +195,35 @@ export default function AppShell() {
           >
             {/* Close handle bar at top */}
             <div
-              onClick={() => setStudioDrawerOpen(false)}
               style={{
-                height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', borderBottom: '1px solid var(--glass-border)',
+                height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                gap: 12,
+                borderBottom: '1px solid var(--glass-border)',
                 background: 'var(--bg-surface)',
               }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-surface)'}
             >
-              <div style={{ width: 40, height: 3, borderRadius: 2, background: 'var(--text-dim)', opacity: 0.4 }} />
+              <div
+                onClick={() => setStudioDrawerOpen(false)}
+                style={{ cursor: 'pointer', padding: '4px 16px', display: 'flex', alignItems: 'center' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <div style={{ width: 40, height: 3, borderRadius: 2, background: 'var(--text-dim)', opacity: 0.4 }} />
+              </div>
+              <button
+                onClick={() => { setStudioDrawerOpen(false); useUIStore.getState().setActiveView('studio'); if (immersive) useUIStore.getState().setSpaceAdventure('on'); }}
+                style={{
+                  position: 'absolute', right: 16,
+                  padding: '4px 14px', fontSize: 11, fontWeight: 600,
+                  borderRadius: 16, background: 'var(--accent-muted)', color: 'var(--accent)',
+                  border: '1px solid var(--border-accent)', cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-glow)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'var(--accent-muted)'}
+              >
+                ⤢ Open Full Studio
+              </button>
             </div>
             <div style={{ height: 'calc(100% - 28px)', overflow: 'auto' }}>
               <StudioView />
@@ -152,26 +234,23 @@ export default function AppShell() {
 
       {/* Now Playing Bar — always visible; in immersive mode, premium floating center */}
       {immersive ? (
-        <>
-          {/* Window controls — top right, visible on hover */}
+        <div className="immersive-wrapper">
+          {/* Window controls — top right, always-accessible */}
           <div className="immersive-controls" style={{
-            position: 'fixed', top: 0, right: 0, zIndex: 999,
-            display: 'flex', gap: 0, opacity: 0, transition: 'opacity 0.3s',
-          }}
-            onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-            onMouseLeave={e => e.currentTarget.style.opacity = '0'}
-          >
-            <div style={{ width: '100vw', height: 36, position: 'absolute', top: 0, left: 0 }} 
-              onMouseEnter={e => e.currentTarget.parentElement.style.opacity = '1'} />
+            position: 'fixed', top: 0, right: 0, zIndex: 9999,
+            display: 'flex', gap: 0, WebkitAppRegion: 'no-drag',
+          }}>
+            {/* Wide hover zone across top */}
+            <div style={{ position: 'absolute', top: 0, left: -200, width: 'calc(100% + 200px)', height: 44 }} />
             {[
               { label: '—', action: () => window.electronAPI?.windowControl?.('minimize') },
               { label: '☐', action: () => window.electronAPI?.windowControl?.('maximize') },
               { label: '✕', action: () => window.electronAPI?.windowControl?.('close'), danger: true },
             ].map((btn, i) => (
-              <button key={i} onClick={btn.action} style={{
+              <button key={i} onClick={(e) => { e.stopPropagation(); btn.action(); }} style={{
                 width: 46, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: 'transparent', color: 'rgba(255,255,255,0.7)', fontSize: 13,
-                border: 'none', cursor: 'pointer', transition: 'background 0.15s',
+                border: 'none', cursor: 'pointer', transition: 'background 0.15s', position: 'relative', zIndex: 10000,
               }}
                 onMouseEnter={e => e.currentTarget.style.background = btn.danger ? 'rgba(220,50,50,0.8)' : 'rgba(255,255,255,0.1)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
@@ -179,16 +258,39 @@ export default function AppShell() {
             ))}
           </div>
 
-          {/* Exit & Normal View buttons — transparent by default, translucent on hover */}
-          <div style={{
+          {/* Exit, Normal View & Super Immersive toggle — bottom left, 10% ambient */}
+          <div className="immersive-side-btns" style={{
             position: 'fixed', bottom: 24, left: 24, zIndex: 55,
-            opacity: 0, transition: 'opacity 0.3s', display: 'flex', flexDirection: 'column', gap: 8
-          }}
-            onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-            onMouseLeave={e => e.currentTarget.style.opacity = '0'}
-          >
+            display: 'flex', flexDirection: 'column', gap: 8,
+          }}>
             {/* Hover zone */}
-            <div style={{ position: 'absolute', bottom: -24, left: -24, width: 200, height: 120 }} />
+            <div style={{ position: 'absolute', bottom: -24, left: -24, width: 220, height: 180 }} />
+            <button
+              onClick={cycleBackgroundTheme}
+              style={{
+                padding: '8px 18px', borderRadius: 24, fontSize: 12, fontWeight: 600,
+                background: backgroundTheme === 'harmattan' ? 'rgba(210,170,100,0.2)' : 'rgba(255,255,255,0.04)',
+                color: backgroundTheme === 'harmattan' ? 'rgb(230,200,140)' : 'rgba(255,255,255,0.6)',
+                border: `1px solid ${backgroundTheme === 'harmattan' ? 'rgba(210,170,100,0.3)' : 'rgba(255,255,255,0.06)'}`,
+                cursor: 'pointer', backdropFilter: 'blur(16px)', transition: 'all 0.2s',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              {backgroundTheme === 'harmattan' ? '🏜️ Harmattan' : '🌌 Space'}
+            </button>
+            <button
+              onClick={() => { const s = useUIStore.getState(); s.toggleSuperImmersive(); }}
+              style={{
+                padding: '8px 18px', borderRadius: 24, fontSize: 12, fontWeight: 600,
+                background: superImmersive ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.04)',
+                color: superImmersive ? 'var(--accent)' : 'rgba(255,255,255,0.6)',
+                border: `1px solid ${superImmersive ? 'rgba(139,92,246,0.3)' : 'rgba(255,255,255,0.06)'}`,
+                cursor: 'pointer', backdropFilter: 'blur(16px)', transition: 'all 0.2s',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              ⚡ {superImmersive ? 'Super Mode ON' : 'Super Mode'}
+            </button>
             <button
               onClick={() => useUIStore.getState().setSpaceAdventure('on')}
               style={{
@@ -219,12 +321,12 @@ export default function AppShell() {
             </button>
           </div>
 
-          {/* Floating player + presets + queue — transparent by default */}
+          {/* Floating player + presets + queue — 10% ambient, full on hover */}
           <div
             className="immersive-player-panel"
             style={{
               position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-              width: 680, maxWidth: '94vw', zIndex: 50,
+              width: 860, maxWidth: '94vw', zIndex: 50,
               background: 'rgba(10, 10, 30, 0.0)',
               borderRadius: 20, border: '1px solid rgba(255,255,255,0.0)',
               overflow: 'hidden',
@@ -243,20 +345,34 @@ export default function AppShell() {
               e.currentTarget.style.backdropFilter = 'blur(0px)';
             }}
           >
-            {/* Audio Presets Strip */}
             <ImmersivePresets />
-
-            {/* Up Next Queue (scrollable, above controls) */}
             <ImmersiveQueue />
-
             <NowPlayingBar />
           </div>
 
           <style>{`
-            .immersive-player-panel > * { transition: opacity 0.3s ease; opacity: 0; pointer-events: none; }
-            .immersive-player-panel:hover > * { opacity: 1; pointer-events: auto; }
+            ${superImmersive ? `
+              /* Super Immersive: fully invisible, fast reveal on hover */
+              .immersive-controls { opacity: 0; transition: opacity 0.3s ease; }
+              .immersive-controls:hover { opacity: 1; }
+              .immersive-side-btns { opacity: 0; transition: opacity 0.3s ease; }
+              .immersive-side-btns:hover { opacity: 1; }
+              .immersive-player-panel > * { opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+              .immersive-player-panel:hover > * { opacity: 1; pointer-events: auto; }
+            ` : `
+              /* Normal Immersive: invisible after inactivity, slower fade */
+              .immersive-controls { opacity: ${immersiveActive ? '0.10' : '0'}; transition: opacity ${immersiveActive ? '0.3s' : '3s'} ease; }
+              .immersive-controls:hover { opacity: 1 !important; transition: opacity 0.3s ease; }
+              .immersive-side-btns { opacity: ${immersiveActive ? '0.10' : '0'}; transition: opacity ${immersiveActive ? '0.3s' : '3s'} ease; }
+              .immersive-side-btns:hover { opacity: 1 !important; transition: opacity 0.3s ease; }
+              .immersive-player-panel > * { opacity: ${immersiveActive ? '0.10' : '0'}; pointer-events: none; transition: opacity ${immersiveActive ? '0.3s' : '3s'} ease; }
+              .immersive-player-panel:hover > * { opacity: 1 !important; pointer-events: auto; transition: opacity 0.3s ease; }
+              /* Coordinated reveal on any hover */
+              .immersive-wrapper:hover .immersive-controls { opacity: 1 !important; transition: opacity 0.3s ease; }
+              .immersive-wrapper:hover .immersive-side-btns { opacity: 1 !important; transition: opacity 0.3s ease; }
+            `}
           `}</style>
-        </>
+        </div>
       ) : (
         <NowPlayingBar />
       )}
@@ -298,13 +414,14 @@ export default function AppShell() {
 
 /* ─── Immersive Presets Strip ─── */
 function ImmersivePresets() {
-  const { activePresets, applyPreset } = usePlayerStore();
+  const { activePresets, applyPreset, params, setParam } = usePlayerStore();
   const presetNames = Object.keys(PRESETS);
+  const preservePitch = params.preservePitch || false;
   return (
     <div style={{
       display: 'flex', gap: 6, padding: '10px 16px 8px',
       overflowX: 'auto', borderBottom: '1px solid rgba(255,255,255,0.04)',
-      scrollbarWidth: 'none',
+      scrollbarWidth: 'none', alignItems: 'center',
     }}>
       {presetNames.map(name => {
         const isActive = activePresets.includes(name);
@@ -321,6 +438,21 @@ function ImmersivePresets() {
           >{name}</button>
         );
       })}
+      {/* ── Voice: Original / Effect ── */}
+      <div style={{ width: 1, height: 18, background: 'rgba(255,255,255,0.08)', flexShrink: 0, margin: '0 4px' }} />
+      <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', borderRadius: 14, padding: 2, border: '1px solid rgba(255,255,255,0.06)', flexShrink: 0 }}>
+        {[{ label: 'Original', val: true }, { label: 'Effect', val: false }].map(opt => {
+          const active = preservePitch === opt.val;
+          return (
+            <button key={opt.label} onClick={() => setParam('preservePitch', opt.val)} style={{
+              padding: '3px 10px', borderRadius: 12, fontSize: 10, fontWeight: 700,
+              border: 'none', cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap',
+              background: active ? 'rgba(var(--accent-rgb, 139,92,246), 0.25)' : 'transparent',
+              color: active ? 'var(--accent)' : 'rgba(255,255,255,0.4)',
+            }}>{opt.label}</button>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -133,9 +133,10 @@
   --text-dim: #8888a0;
   --text-faint: rgba(0, 0, 0, 0.15);
   --glass: rgba(255, 255, 255, 0.7);
-  --glass-border: rgba(0, 0, 0, 0.08);
-  --glass-heavy: rgba(255, 255, 255, 0.85);
-  --border-subtle: rgba(0, 0, 0, 0.06);
+  --glass-border: rgba(0, 0, 0, 0.1);
+  --glass-heavy: rgba(255, 255, 255, 0.9);
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  color-scheme: light;
 }
 
 /* ═══════════════════════════════════════════════
@@ -189,6 +190,8 @@ a { color: var(--accent); text-decoration: none; }
   border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.15); }
+[data-mode='light'] ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); }
+[data-mode='light'] ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.22); }
 
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
