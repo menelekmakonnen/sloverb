@@ -280,8 +280,19 @@ async function _fetchAlbumArt(filePath) {
     if (picture && picture.length > 0) {
         return `data:${picture[0].format};base64,${picture[0].data.toString('base64')}`;
     }
-    // 2. Fallback: look for cover art images in the same folder
+    // 2. Check for a matching thumbnail saved alongside the file (YouTube downloads)
     const dir = path.dirname(filePath);
+    const baseName = path.basename(filePath, path.extname(filePath));
+    const thumbExts = ['.jpg', '.jpeg', '.png', '.webp'];
+    for (const ext of thumbExts) {
+        const thumbPath = path.join(dir, `${baseName}_thumb${ext}`);
+        if (fs.existsSync(thumbPath)) {
+            const imgData = fs.readFileSync(thumbPath);
+            const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+            return `data:${mime};base64,${imgData.toString('base64')}`;
+        }
+    }
+    // 3. Fallback: look for cover art images in the same folder
     const coverNames = ['cover', 'folder', 'album', 'front', 'artwork', 'thumb'];
     const imgExts = ['.jpg', '.jpeg', '.png', '.webp', '.bmp'];
     const dirFiles = fs.readdirSync(dir);
@@ -296,7 +307,7 @@ async function _fetchAlbumArt(filePath) {
             }
         }
     }
-    // 3. Fallback: any image file in the folder
+    // 4. Fallback: any image file in the folder
     const anyImg = dirFiles.find(f => imgExts.some(e => f.toLowerCase().endsWith(e)));
     if (anyImg) {
         const imgPath = path.join(dir, anyImg);
@@ -473,7 +484,30 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
         const fileSize = fs.statSync(filepath).size;
         console.log('[YouTube] Downloaded:', filepath, `(${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
 
-        // Step 4: Auto-add to library
+        // Step 4: Download thumbnail/cover art
+        let thumbnailPath = null;
+        const thumbUrl = info.thumbnail || (info.thumbnails && info.thumbnails.length > 0 ? info.thumbnails[info.thumbnails.length - 1].url : null);
+        if (thumbUrl) {
+            try {
+                const thumbFileName = `${fileName}_thumb.jpg`;
+                thumbnailPath = path.join(ytDownloadDir, thumbFileName);
+                console.log('[YouTube] Downloading thumbnail:', thumbUrl);
+                const thumbResponse = await net.fetch(thumbUrl);
+                if (thumbResponse.ok) {
+                    const thumbBuffer = Buffer.from(await thumbResponse.arrayBuffer());
+                    fs.writeFileSync(thumbnailPath, thumbBuffer);
+                    console.log('[YouTube] Thumbnail saved:', thumbnailPath);
+                } else {
+                    console.log('[YouTube] Thumbnail fetch failed:', thumbResponse.status);
+                    thumbnailPath = null;
+                }
+            } catch (thumbErr) {
+                console.log('[YouTube] Thumbnail download failed (non-fatal):', thumbErr.message);
+                thumbnailPath = null;
+            }
+        }
+
+        // Step 5: Auto-add to library
         const ext = path.extname(outputFile).toLowerCase();
         const libraryItem = {
             id: filepath,
@@ -482,6 +516,7 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
             path: filepath,
             artist: artist,
             album: 'YouTube Downloads',
+            thumbnail: thumbnailPath,
             timestamp: Date.now(),
         };
         // Read existing library and append
@@ -499,7 +534,7 @@ ipcMain.handle('fetch-youtube', async (event, url) => {
         }
         console.log('[YouTube] Added to library:', displayTitle);
 
-        return { title: displayTitle, artist, path: filepath, id: filepath, size: fileSize, libraryItem };
+        return { title: displayTitle, artist, path: filepath, id: filepath, size: fileSize, thumbnailPath, libraryItem };
 
     } catch (e) {
         console.error("[YouTube] Fetch Error:", e.message || e);
@@ -568,11 +603,16 @@ let activeStreamProcs = null; // { ytdlp, ffmpeg }
 
 // Resolve yt-dlp binary from youtube-dl-exec
 function getYtDlpPath() {
-    // Direct path from project root
+    // In packaged builds, binaries are in app.asar.unpacked (can't execute from app.asar)
     const direct = path.join(__dirname, '..', 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp.exe');
+    // Check unpacked path first (for production builds)
+    const unpacked = direct.replace('app.asar', 'app.asar.unpacked');
+    if (fs.existsSync(unpacked)) return unpacked;
     if (fs.existsSync(direct)) return direct;
     // Also check sibling to electron dir
     const alt = path.join(__dirname, 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp.exe');
+    const altUnpacked = alt.replace('app.asar', 'app.asar.unpacked');
+    if (fs.existsSync(altUnpacked)) return altUnpacked;
     if (fs.existsSync(alt)) return alt;
     return 'yt-dlp'; // fallback to PATH
 }

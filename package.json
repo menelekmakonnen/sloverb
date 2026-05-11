@@ -40,6 +40,10 @@
             "public/logo.png",
             "public/icon.ico"
         ],
+        "asarUnpack": [
+            "node_modules/youtube-dl-exec/**/*",
+            "node_modules/ffmpeg-static/**/*"
+        ],
         "fileAssociations": [
             {
                 "ext": ["mp3", "wav", "flac", "m4a", "ogg", "aac", "wma"],

@@ -218,6 +218,7 @@ export default function StudioView() {
         name: data.title, path: data.path, id: data.id,
         type: data.path?.endsWith('.mp4') ? 'video' : 'youtube',
         artist: data.artist || 'YouTube', album: 'YouTube Downloads',
+        thumbnail: data.thumbnailPath,
       };
       store.addToQueue(queueItem);
       // Save to download history
@@ -331,15 +332,7 @@ export default function StudioView() {
                 <p style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px', textAlign: 'left' }}>YouTube Import</p>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input value={youtubeUrl} onChange={e => store.setYoutubeUrl(e.target.value)} placeholder="Paste YouTube link..." className="input" style={{ flex: 1 }} />
-                  <button onClick={async () => {
-                    if (audioBuffer) {
-                      store.addToQueue({ type: 'youtube', url: youtubeUrl, name: 'YouTube Track' });
-                      addToast('Added YouTube link to queue', 'success');
-                      store.setYoutubeUrl('');
-                    } else {
-                      handleYoutube();
-                    }
-                  }} disabled={!youtubeUrl} className="btn btn-primary" style={{ opacity: youtubeUrl ? 1 : 0.5 }}><Globe size={14} /> Load</button>
+                  <button onClick={() => handleYoutube()} disabled={!youtubeUrl} className="btn btn-primary" style={{ opacity: youtubeUrl ? 1 : 0.5 }}><Globe size={14} /> Load</button>
                 </div>
               </div>
             )}
